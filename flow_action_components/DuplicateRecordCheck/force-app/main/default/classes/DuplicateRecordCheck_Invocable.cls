@@ -1,12 +1,13 @@
 /**
  * @description       : Contains the Invocable Method that runs the duplicate rules on a particular record(s) to see if a duplicate record(s) exists.
  * @group             : UnofficialSF
- * @last modified on  : 01-27-2022
+ * @last modified on  : 05-10-2024
  * Modifications Log
  * Ver   Date         Modification
  * 1.0   06-16-2021   Initial Version
  * 2.0   11-27-2021   Code Optimization
  * 3.0   01-27-2022   Implementing Dependency Injection
+ * 4.0   05-10-2024   Adjustments to return DuplicateResponse and list of duplicates instead of just best duplicate.
 **/
 
 public with sharing class DuplicateRecordCheck_Invocable{
@@ -24,26 +25,23 @@ public with sharing class DuplicateRecordCheck_Invocable{
 
         List<sObject> listsObjectsToCheck = new List<sObject>();
         for(Input input : inputs){
-            if(input.record != null) listsObjectsToCheck.add(input.record);
-            if(input.records != null) listsObjectsToCheck.addAll(input.records);
+            if(input.record != null){ listsObjectsToCheck.add(input.record); }
+            if(input.records != null){ listsObjectsToCheck.addAll(input.records); }
         }
 
-        List<Duplicate> duplicates = DuplicateRecordCheck_Util.findDuplicates(listsObjectsToCheck);
+        List<DuplicateResponse> duplicateResponses = DuplicateRecordCheck_Util.findDuplicates(listsObjectsToCheck);
 
         List<Output> outputs = new List<Output>();
-        for(Input input : inputs){
+        for(Input input : inputs)
+        {
             Output output = new Output();
-            if(input.record != null){
-                output.duplicate = duplicates.remove(0);
+            if(input.record != null) {
+                output.duplicateResponse = duplicateResponses.get(0);
             }
-
-            if(input.records != null){
-                output.duplicates = new List<Duplicate>();
-                for(sObject record : input.records){
-                    output.duplicates.add(duplicates.remove(0));
-                }
+            
+            if(input.records != null) {
+                output.duplicateResponses = duplicateResponses;
             }
-
             outputs.add(output);
         }
 
@@ -61,14 +59,19 @@ public with sharing class DuplicateRecordCheck_Invocable{
         public List<sObject> records;
     }
 
+    
+
     /**
     * @description Wrapper class for invocable outputs
     **/
     public class Output{
-        @InvocableVariable(label='Duplicate Result from Single Record')
-        public Duplicate duplicate;
+        @InvocableVariable(label='Has Duplicate')
+        public Boolean hasDuplicate;
 
-        @InvocableVariable(label='Duplicate Results from Collection of Records')
-        public List<Duplicate> duplicates;
+        @InvocableVariable(label='Duplicate Response from Single Record')
+        public DuplicateResponse duplicateResponse;
+
+        @InvocableVariable(label='Duplicate Responses from Collection of Records')
+        public List<DuplicateResponse> duplicateResponses;
     }
 }

@@ -1,13 +1,14 @@
 /**
  * @description       : Test class for DuplicateRecordCheck
  * @group             : UnofficialSF
- * @last modified on  : 01-28-2022
+ * @last modified on  : 05-10-2024
  * Modifications Log
  * Ver   Date         Modification
  * 1.0   06-16-2021   Initial Version
  * 2.0   11-27-2021   Code Optimization
  * 2.5   12-03-2021   Test Simplification
  * 3.0   01-28-2022   Testing Dependency Injection
+ * 4.0   05-10-2024   Adjusting test to work with DuplicateResponse changes
 **/
 @isTest
 public class DuplicateRecordCheck_Test{
@@ -35,14 +36,26 @@ public class DuplicateRecordCheck_Test{
 
         System.assertEquals(NUMBER_OF_LOOPS, outputs.size());
         for(DuplicateRecordCheck_Invocable.Output output : outputs){
-            System.assertEquals(TRUE, output.Duplicate.isDuplicate);
-            System.assertEquals(MATCHING_ID, output.Duplicate.duplicateRecordId);
-            System.assertEquals(OBJECT_NAME, output.Duplicate.duplicatesObjectType);
-
-            for(Duplicate duplicate : output.duplicates){
-                System.assertEquals(TRUE, duplicate.isDuplicate);
+            //Test Single Record
+            System.assertEquals(TRUE, output.duplicateResponse.hasDuplicate);
+            System.assertEquals(MATCHING_ID, output.duplicateResponse.bestMatchDuplicate.duplicateRecordId);
+            System.assertEquals(OBJECT_NAME, output.duplicateResponse.bestMatchDuplicate.duplicatesObjectType);
+            for(Duplicate duplicate : output.duplicateResponse.duplicates)
+            {
                 System.assertEquals(MATCHING_ID, duplicate.duplicateRecordId);
                 System.assertEquals(OBJECT_NAME, duplicate.duplicatesObjectType);
+            }
+
+            //Test Record Collection
+            for(DuplicateResponse duplicateResponse : output.duplicateResponses){
+                System.assertEquals(TRUE, duplicateResponse.hasDuplicate);
+                System.assertEquals(MATCHING_ID, duplicateResponse.bestMatchDuplicate.duplicateRecordId);
+                System.assertEquals(OBJECT_NAME, duplicateResponse.bestMatchDuplicate.duplicatesObjectType);
+                for(Duplicate duplicate : duplicateResponse.duplicates)
+                {
+                    System.assertEquals(MATCHING_ID, duplicate.duplicateRecordId);
+                    System.assertEquals(OBJECT_NAME, duplicate.duplicatesObjectType);
+                }
             }
         }
     }
@@ -56,6 +69,7 @@ public class DuplicateRecordCheck_Test{
         for(Integer i = 1; i <= NUMBER_OF_LOOPS; i++){
 	        DuplicateRecordCheck_Invocable.Input input = new DuplicateRecordCheck_Invocable.Input();
             input.record = new Account();
+            input.records = new List<sObject>{new Account()};
             inputs.add(input);
         }
 
@@ -65,9 +79,17 @@ public class DuplicateRecordCheck_Test{
         
         System.assertEquals(NUMBER_OF_LOOPS, outputs.size());
         for(DuplicateRecordCheck_Invocable.Output output : outputs){
-            System.assertEquals(FALSE, output.Duplicate.isDuplicate);
-            System.assertEquals(NULL, output.Duplicate.duplicateRecordId);
-            System.assertEquals(NULL, output.Duplicate.duplicatesObjectType);
+            //Test Single Record
+            System.assertEquals(FALSE, output.duplicateResponse.hasDuplicate);
+            System.assertEquals(NULL, output.duplicateResponse.bestMatchDuplicate);
+            System.assertEquals(NULL, output.duplicateResponse.duplicates);
+
+            //Test Record Collection
+            for(DuplicateResponse duplicateResponse : output.duplicateResponses){
+                System.assertEquals(FALSE, duplicateResponse.hasDuplicate);
+                System.assertEquals(NULL, duplicateResponse.bestMatchDuplicate);
+                System.assertEquals(NULL, duplicateResponse.duplicates);
+            }
         }
     }
 
@@ -93,9 +115,9 @@ public class DuplicateRecordCheck_Test{
         List<Duplicate> duplicates = new List<Duplicate>();
         for(Integer i = 1; i <= NUMBER_OF_LOOPS; i++){
             if(i == 1){
-                duplicates.add(new Duplicate(FALSE,null,null,null));
+                duplicates.add(new Duplicate(null,null,null));
             } else {
-                duplicates.add(new Duplicate(TRUE,null,null,i));
+                duplicates.add(new Duplicate(null,null,i));
             }
         }
         duplicates.sort();

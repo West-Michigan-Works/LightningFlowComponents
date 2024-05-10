@@ -1,10 +1,11 @@
 /**
  * @description       : Contains the Utility Method that runs the duplicate rules on a particular record(s) to see if a duplicate record(s) exists.
  * @group             : UnofficialSF
- * @last modified on  : 01-28-2022
+ * @last modified on  : 05-10-2024
  * Modifications Log
  * Ver   Date         Modification
  * 1.0   01-28-2022   Initial Version
+ * 2.0   05-10-2024   Adjustments to work with DuplicateResults and returning list of duplicates
 **/
 public with sharing class DuplicateRecordCheck_Util {
     private final FindDuplicates findDuplicates;
@@ -21,7 +22,7 @@ public with sharing class DuplicateRecordCheck_Util {
     * @param List<Input> inputs 
     * @return List<Duplicate> 
     **/
-    public static List<Duplicate> findDuplicates(List<sObject> records){
+    public static List<DuplicateResponse> findDuplicates(List<sObject> records){
         // The documentation states that the max input array for the findDuplicates method is 50.
         // We are instantiating a new list to house the results in case we have to execute the method multiple times.
         List<FindDuplicates.FindDuplicatesResult> results = new List<FindDuplicates.FindDuplicatesResult>();
@@ -42,35 +43,39 @@ public with sharing class DuplicateRecordCheck_Util {
             results.addAll(self.findDuplicates.findDuplicates(listsObjectsToCheck));
         }
 
-        // The mapIndexToDuplicate is a map where the key is the index and the value is the best Duplicate result (if any exist).
+        // The mapIndexToDuplicate is a map where the key is the index and the value is a List of Duplicate results (if any exist).
         Integer index = 0;
-        Map<Integer,Duplicate> mapIndexToDuplicate = new Map<Integer,Duplicate>();
+        Map<Integer,DuplicateResponse> mapIndexToDuplicates = new Map<Integer,DuplicateResponse>();
         for(FindDuplicates.FindDuplicatesResult find : results) {
-            // Add the default Duplicate to the map, which is simply Duplicate.isDuplicate = FALSE.
-            mapIndexToDuplicate.put(index,new Duplicate(FALSE,null,null,null));
+            DuplicateResponse duplicateReponse = new DuplicateResponse(FALSE, records.get(index).Id, records.get(index).getSObjectType().getDescribe().getName(), null, null);
             for(FindDuplicates.DuplicateResult result : find.getDuplicateResults) {
                 // result has a bunch of information about the Duplicate Rule being applied.
                 for(FindDuplicates.MatchResult match : result.getMatchResults) {
                     // match has a bunch of information about the Matching Rule being applied.
                     
-                    // Instantiate a new list of Duplicates with the Duplicate from the map.
-                    List<Duplicate> duplicates = new List<Duplicate>{mapIndexToDuplicate.get(index)};
+                    // Instantiate a new list of Duplicates with the Duplicates from the map.
+                    List<Duplicate> duplicates = new List<Duplicate>();
                     for(FindDuplicates.MatchRecord record : match.getMatchRecords) {
                         Id recordId = record.getRecordId;
                         Double matchConfidence = record.getMatchConfidence == null ? 0 : record.getMatchConfidence;
                         String sObjectType = recordId.getSObjectType().getDescribe().getName();
-                        duplicates.add(new Duplicate(TRUE,recordId,sObjectType,matchConfidence));
+                        duplicates.add(new Duplicate(recordId,sObjectType,matchConfidence));
                     }
                     
                     // The Duplicate object implements the Comparable interface, so we are sorting the list in a specific way.
                     // The best Duplicate is the first object from the list because it has the highest matchConfidence.
                     duplicates.sort();
-                    mapIndexToDuplicate.put(index,duplicates.remove(0));
+                    if(duplicates.size()>0){
+                        duplicateReponse.hasDuplicate = TRUE;
+                        duplicateReponse.bestMatchDuplicate = duplicates.get(0);                    
+                        duplicateReponse.duplicates = duplicates;
+                    }
                 }
+                mapIndexToDuplicates.put(index,duplicateReponse);
             }
             index++;
         }
 
-        return mapIndexToDuplicate.values();
+        return mapIndexToDuplicates.values();
     }
 }

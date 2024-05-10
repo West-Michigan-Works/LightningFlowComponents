@@ -1,15 +1,13 @@
 /**
  * @description       : Duplicate
  * @group             : UnofficialSF
- * @last modified on  : 02-18-2022
+ * @last modified on  : 05-10-2024
  * Modifications Log
  * Ver   Date         Modification
  * 1.0   02-18-2022   Initial Version
+ * 2.0   05-10-2024   Removed isDuplicate. Created hasDuplicate in DuplicateResponse
 **/
 public with sharing class Duplicate implements Comparable{
-    @AuraEnabled
-    public Boolean isDuplicate;
-
     @AuraEnabled
     public Id duplicateRecordId;
 
@@ -19,8 +17,7 @@ public with sharing class Duplicate implements Comparable{
     @TestVisible
     private Double matchConfidence;
 
-    public Duplicate(Boolean isDuplicate, Id duplicateRecordId, String duplicatesObjectType, Double matchConfidence){
-        this.isDuplicate = isDuplicate;
+    public Duplicate(Id duplicateRecordId, String duplicatesObjectType, Double matchConfidence){
         this.duplicateRecordId = duplicateRecordId;
         this.duplicatesObjectType = duplicatesObjectType;
         this.matchConfidence = matchConfidence;

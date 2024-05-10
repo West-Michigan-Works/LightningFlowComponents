@@ -1,10 +1,11 @@
 /**
  * @description       : Exposes the Datacloud FindDuplicates method in extendable fashion so tests can be mocked.
  * @group             : UnofficialSF
- * @last modified on  : 01-28-2022
+ * @last modified on  : 05-10-2024
  * Modifications Log
  * Ver   Date         Modification
  * 1.0   01-28-2022   Initial Version
+ * 1.1   05-10-2024   Fix Typo
 **/
 public with sharing virtual class FindDuplicates {
     
@@ -73,7 +74,7 @@ public with sharing virtual class FindDuplicates {
     }
 
     /**
-    * @description Wrapper class for MatchResult to mimic the shape of https://developer.salesforce.com/docs/atlas.en-us.apexref.meta/apexref/apex_class_Datacloud_MatchRecord.htm
+    * @description Wrapper class for MatchRecord to mimic the shape of https://developer.salesforce.com/docs/atlas.en-us.apexref.meta/apexref/apex_class_Datacloud_MatchRecord.htm
     **/
     public class MatchRecord{
         public Id getRecordId;
