@@ -12,7 +12,7 @@ import { LightningElement, api, track, wire } from 'lwc';
 import getReturnResults from '@salesforce/apex/ers_DatatableController.getReturnResults';
 import { FlowAttributeChangeEvent, FlowNavigationNextEvent } from 'lightning/flowSupport';
 import {getPicklistValuesByRecordType} from "lightning/uiObjectInfoApi";
-import { getConstants } from 'c/ers_datatableUtils';
+import { getConstants, columnValue, removeSpaces, convertFormat, convertType, convertTime, removeRowFromCollection, replaceRowInCollection, findRowIndexById } from 'c/ers_datatableUtils';
 
 // Translatable Custom Labels
 import CancelButton from '@salesforce/label/c.ers_CancelButton';
@@ -27,8 +27,18 @@ import LabelHeader from '@salesforce/label/c.ers_LabelHeader';
 import RequiredMessage from '@salesforce/label/c.ers_ErrorRequiredEntry';
 import EmptyMessage from '@salesforce/label/c.ers_EmptyTableMessage';
 import SearchPlaceholder from '@salesforce/label/c.ers_SearchPlaceholder';
+import FirstButton from '@salesforce/label/c.ers_FirstButton';
+import PreviousButton from '@salesforce/label/c.ers_PreviousButton';
+import NextButton from '@salesforce/label/c.ers_NextButton';
+import LastButton from '@salesforce/label/c.ers_LastButton';
+import RecordsPerPage from '@salesforce/label/c.ers_RecordsPerPage';
+import ShowingPagePrefix from '@salesforce/label/c.ers_ShowingPagePrefix';
+import ShowingPageMiddle from '@salesforce/label/c.ers_ShowingPageMiddle';
+import ShowingPageSuffix from '@salesforce/label/c.ers_ShowingPageSuffix';
+import FilterBlankLabel from '@salesforce/label/c.ers_filterBlankLabel';
+import FilterBlankHelpText from '@salesforce/label/c.ers_filterBlankHelpText';
 
-const CONSTANTS = getConstants();   // From ers_datatableUtils : VERSION_NUMBER, MAXROWCOUNT, ROUNDWIDTH, MYDOMAIN, ISCOMMUNITY, ISFLOWBUILDER, MIN_SEARCH_TERM_SIZE, SEARCH_WAIT_TIME
+const CONSTANTS = getConstants();   // From ers_datatableUtils
 
 const MYDOMAIN = CONSTANTS.MYDOMAIN;
 const ISCOMMUNITY = CONSTANTS.ISCOMMUNITY;
@@ -36,6 +46,11 @@ const ISFLOWBUILDER = CONSTANTS.ISFLOWBUILDER;
 const CB_TRUE = CONSTANTS.CB_TRUE;
 const MIN_SEARCH_TERM_SIZE = CONSTANTS.MIN_SEARCH_TERM_SIZE;
 const SEARCH_WAIT_TIME = CONSTANTS.SEARCH_WAIT_TIME;
+const RECORDS_PER_PAGE = CONSTANTS.RECORDS_PER_PAGE;
+const SHOW_DEBUG_INFO = CONSTANTS.SHOW_DEBUG_INFO;
+const DEBUG_INFO_PREFIX = CONSTANTS.DEBUG_INFO_PREFIX;
+const DEFAULT_COL_WIDTH = CONSTANTS.DEFAULT_COL_WIDTH;
+const FILTER_BLANKS = CONSTANTS.FILTER_BLANKS;
 
 export default class Datatable extends LightningElement {
 
@@ -52,12 +67,30 @@ export default class Datatable extends LightningElement {
         LabelHeader,
         RequiredMessage,
         EmptyMessage,
-        SearchPlaceholder
+        SearchPlaceholder,
+        FirstButton,
+        PreviousButton,
+        NextButton,
+        LastButton,
+        RecordsPerPage,
+        ShowingPagePrefix,
+        ShowingPageMiddle,
+        ShowingPageSuffix,
+        FilterBlankLabel,
+        FilterBlankHelpText
     };
 
     // Component Input & Output Attributes
     //@api tableData = []; see new version below
-    @api columnFields = '';
+    @api 
+    get columnFields() {
+        return (this.isEmptyUserDefinedObject) ? this.keyField : this._columnFields;
+    }
+    set columnFields(value) {
+        this._columnFields = value;
+    }
+    _columnFields;
+
     @api columnAlignments = [];
     @api columnCellAttribs = [];
     @api columnEdits = '';
@@ -81,7 +114,54 @@ export default class Datatable extends LightningElement {
     @api outputSelectedRow;
     @api outputEditedRows = [];
     @api tableIcon;
-    @api tableLabel;
+    
+    // Remove Row Action Attributes
+    @api removeLabel = 'Remove Row';
+    @api removeIcon = 'utility:close';
+    @api removeColor = 'remove-icon';   // Default red
+    @api maxRemovedRows = 0;
+    @api removeRowLeftOrRight = 'Right';
+    @api outputRemovedRows = [];
+    @api numberOfRowsRemoved = 0;
+
+    // @api outputRemainingRows = [];   // v4.3.3 - changed to get/set
+    @api
+    get outputRemainingRows() {
+        return this._outputRemainingRows;
+    }
+    set outputRemainingRows(value) {
+        this._outputRemainingRows = value;
+    }
+    _outputRemainingRows = [];
+
+    removeRowActionColNum;
+
+    @api 
+    get isRemoveRowAction() {
+        return (this.cb_isRemoveRowAction == CB_TRUE) ? true : false;
+    }
+    set isRemoveRowAction(value) {
+        this._isRemoveRowAction = value;
+    }
+    _isRemoveRowAction;
+    @api cb_isRemoveRowAction;
+
+    // Console Log differentiation
+    get consoleLogPrefix() {
+        return `${DEBUG_INFO_PREFIX}(${this._tableLabel}) `;
+    }
+
+    // v4.2.0 Make Table Header Label reactive
+    // @api tableLabel;
+    @api 
+    get tableLabel() {
+        return this._tableLabel || '';
+    }
+    set tableLabel(value) {
+        this._tableLabel = value;
+    }
+    _tableLabel;
+
     @api recordTypeId;
 
     _tableData;
@@ -115,6 +195,10 @@ export default class Datatable extends LightningElement {
     get hideCheckboxColumn() {
         return (this.cb_hideCheckboxColumn == CB_TRUE) ? true : false;
     }
+    set hideCheckboxColumn(value) {
+        this._hideCheckboxColumn = value;
+    }
+    _hideCheckboxColumn;
     @api cb_hideCheckboxColumn;
     
     @api 
@@ -133,24 +217,72 @@ export default class Datatable extends LightningElement {
     get showRowNumbers() {
         return (this.cb_showRowNumbers == CB_TRUE) ? true : false;
     }
+    set showRowNumbers(value) {
+        this._showRowNumbers = value;
+    }
+    _showRowNumbers;
     @api cb_showRowNumbers;
     
+    @api 
+    get showPagination() {
+        return (this.cb_showPagination == CB_TRUE) ? true : false;
+    }
+    set showPagination(value) {
+        this._showPagination = value;
+    }
+    _showPagination;
+    @api cb_showPagination;
+
+    @api recordsPerPage = RECORDS_PER_PAGE;
+
+    @api 
+    get showFirstLastButtons() {
+        return (this.cb_showFirstLastButtons == CB_TRUE) ? true : false;
+    }
+    set showFirstLastButtons(value) {
+        this._showFirstLastButtons = value;
+    }
+    _showFirstLastButtons;
+    @api cb_showFirstLastButtons = CB_TRUE;
+
     @api 
     get showRecordCount() {
         return (this.cb_showRecordCount == CB_TRUE) ? true : false;
     }
+    set showRecordCount(value) {
+        this._showRecordCount = value;
+    }
+    _showRecordCount;
     @api cb_showRecordCount;
+
+    @api 
+    get showSelectedCount() {
+        return (this.cb_showSelectedCount == CB_TRUE) ? true : false;
+    }
+    set showSelectedCount(value) {
+        this._showSelectedCount = value;
+    }
+    _showSelectedCount;
+    @api cb_showSelectedCount;
 
     @api 
     get singleRowSelection() {
         return (this.cb_singleRowSelection == CB_TRUE) ? true : false;
     }
+    set singleRowSelection(value) {
+        this._singleRowSelection = value;
+    }
+    _singleRowSelection;
     @api cb_singleRowSelection;
     
     @api 
     get suppressBottomBar() {
         return (this.cb_suppressBottomBar == CB_TRUE) ? true : false;
     }
+    set suppressBottomBar(value) {
+        this._suppressBottomBar = value;
+    }
+    _suppressBottomBar;
     @api cb_suppressBottomBar;
 
     @api 
@@ -175,12 +307,20 @@ export default class Datatable extends LightningElement {
     get isDisplayHeader() {
         return (this.cb_isDisplayHeader == CB_TRUE) ? true : false;
     }
+    set isDisplayHeader(value) {
+        this._isDisplayHeader = value;
+    }
+    _isDisplayHeader;
     @api cb_isDisplayHeader;
 
     @api 
     get isShowSearchBar() {
         return(this.cb_isShowSearchBar == CB_TRUE) ? true : false;
     }
+    set isShowSearchBar(value) {
+        this._isShowSearchBar = value;
+    }
+    _isShowSearchBar;
     @api cb_isShowSearchBar;
 
     searchTerm = '';
@@ -214,6 +354,10 @@ export default class Datatable extends LightningElement {
     get isUserDefinedObject() {
         return (this.cb_isUserDefinedObject == CB_TRUE) ? true : false;
     }
+    set isUserDefinedObject(value) {
+        this._isUserDefinedObject = value;
+    }
+    _isUserDefinedObject;
     @api cb_isUserDefinedObject;
 
     @api get serializedRecordData() {
@@ -264,6 +408,12 @@ export default class Datatable extends LightningElement {
     }
     @api cb_suppressCurrencyConversion;
 
+    @api 
+    get isCaseInsensitiveSort() {
+        return (this.cb_isCaseInsensitiveSort == CB_TRUE) ? true : false;
+    }
+    @api cb_isCaseInsensitiveSort;
+
     @api
     get emptyTableMessage() {
         return this.label.EmptyMessage;
@@ -299,13 +449,31 @@ export default class Datatable extends LightningElement {
     @api outputSelectedRowsString = '';
     @api outputEditedRowsString = '';
     @api outputEditedSerializedRows = '';
+    @api outputRemovedRowsString = '';
+    @api outputRemainingRowsString = '';
     
-    @api columnScales = [];
-    @api columnTypes = [];
+    @api 
+    get columnScales() {
+        return (this.isEmptyUserDefinedObject) ? [] : this._columnScales;
+    }
+    set columnScales(value) {
+        this._columnScales = value;
+    }
+    _columnScales = [];
+
+    @api 
+    get columnTypes() {
+        return (this.isEmptyUserDefinedObject) ? [] : this._columnTypes;
+    }
+    set columnTypes(value) {
+        this._columnTypes = value;
+    }
+    _columnTypes = [];
+    
     @api scaleAttrib = [];
     @api typeAttrib = [];
     
-    // Configuration Wizard Only - Input Attributes
+     // Configuration Wizard Only - Input Attributes
     @api objectName;
 
     // Configuration Wizard Only - Output Attributes
@@ -342,8 +510,7 @@ export default class Datatable extends LightningElement {
     @api errors;
     @api columnWidthValues;
     @track columns = [];
-    @track mydata = [];
-    @track selectedRows = [];
+    // @track mydata = [];
     @track roundValueLabel;
     @track columnWidthsLabel;
     @track isAllEdit = false;
@@ -352,9 +519,29 @@ export default class Datatable extends LightningElement {
     @track showClearButton = false;
     @track showClearFilterButton = false;
     @track tableHeightAttribute = 'height:';
-    // @track tableBorderStyle = 'border-left: var(--lwc-borderWidthThin,1px) solid var(--lwc-colorBorder,rgb(229, 229, 229));' 
-    //     +' border-top: var(--lwc-borderWidthThin,1px) solid var(--lwc-colorBorder,rgb(229, 229, 229));' 
-    //     + ' border-right: var(--lwc-borderWidthThin,1px) solid var(--lwc-colorBorder,rgb(229, 229, 229)); margin: -1px;';
+    @track wrapTableHeader = "by-column";       // v4.3.1 - Column Headers now follow column Clip/Wrap setting
+
+    // Handle Selected Rows retention
+    @api allSelectedRows;       // Obsolete - No longer used but can't be removed
+    @api visibleSelectedRows;   // Obsolete - No longer used but can't be removed
+
+    @api
+    get allSelectedRowIds() {
+        return this._allSelectedRowIds;
+    }
+    set allSelectedRowIds(value) {
+        this._allSelectedRowIds = value;
+    }
+    _allSelectedRowIds = [];
+
+    @api
+    get visibleSelectedRowIds() {
+        return this._visibleSelectedRowIds;
+    }
+    set visibleSelectedRowIds(value) {
+        this._visibleSelectedRowIds = value;
+    }
+    _visibleSelectedRowIds = [];
 
     // Handle Lookup Field Variables   
     @api lookupId;
@@ -377,15 +564,38 @@ export default class Datatable extends LightningElement {
     @track inputLabel;
     @track inputType = 'text';
     @track inputFormat = null;
-    filteredData = [];    
+    
+    @api    // v4.3.3 - changed to get/set
+    get filteredData() {
+        return this._filteredData;
+    }
+    set filteredData(value) {
+        this._filteredData = value;
+    }
+    _filteredData = [];
+
+    // Filter Blanks Attributes v4.3.3
+    isFilterDialog = false;
+    isFilterBlankValues = false;
+    filterBlankLabel = this.label.FilterBlankLabel;
+    filterBlankHelpText = this.label.FilterBlankHelpText;
+
+    @api
+    get headerFilterValue() {
+        let filterValue = this.columnFilterValue;
+        if (this.columnFilterValue == FILTER_BLANKS) {
+            filterValue = '_';
+        }
+        return ` [${filterValue}]`;
+    }
 
     // Other Picklist variables
     masterRecordTypeId = "012000000000000AAA";  // If a recordTypeId is not provided, use this one
     _picklistData;
 
     // Component working variables
-    @api savePreEditData = [];
-    @api editedData = [];
+    // @api savePreEditData = [];   // v4.3.3 - changed to get/set
+    // @api editedData = [];        // v4.3.3 - changed to get/set
     @api outputData = [];
     @api errorApex;
     @api dtableColumnFieldDescriptorString;
@@ -437,6 +647,187 @@ export default class Datatable extends LightningElement {
     @track columnFlexParameter;
     @track columnEditParameter;
     @track columnFilterParameter;
+    
+    get isEmptyUserDefinedObject() {
+        return this.isUserDefinedObject && (!this._tableDataString || this._tableDataString?.length == 0);
+    }
+
+    get collectionSize() {
+        let max = Math.min(CONSTANTS.MAXROWCOUNT, this.maxNumberOfRows);
+        return Math.min(this._tableData.length, max);
+    }
+
+    @api
+    get mydata() {
+        return this._mydata;
+    }
+    set mydata(value) {
+        this._mydata = value;
+        this.handlePagination();
+    }
+    _mydata = [];
+
+    @api    // v4.3.3
+    get savePreEditData() {
+        return this._savePreEditData;
+    }
+    set savePreEditData(value) {
+        this._savePreEditData = value;
+    }
+    _savePreEditData = [];
+
+    @api    // v4.3.3
+    get editedData() {
+        return this._editedData;
+    }
+    set editedData(value) {
+        this._editedData = value;
+    }
+    _editedData = [];
+
+    // Pagination Attributes
+
+    @api
+    get recordCountPerPage() {
+        return this._recordCountPerPage;
+    }
+    set recordCountPerPage(value) {
+        this._recordCountPerPage = value;
+    }
+    _recordCountPerPage;
+
+    get recordCountTotal() {
+        return this.collectionSize;
+    }
+
+    @api
+    get pageCurrentNumber() {
+        return this._pageCurrentNumber;
+    }
+    set pageCurrentNumber(value) {
+        this._pageCurrentNumber = value;
+        this.handlePagination();
+    }
+    _pageCurrentNumber = 1;
+
+    get recordCountLabel() {
+        return this.label.RecordsPerPage;
+    }
+
+    get pageNumberLabel() {
+        return `${this.label.ShowingPagePrefix} ${this._pageCurrentNumber} ${this.label.ShowingPageMiddle} ${this.pageTotalCount} ${this.label.ShowingPageSuffix}`;
+    }
+
+    get buttonFirstLabel() {
+        return this.label.FirstButton;
+    }
+
+    get buttonLastLabel() {
+        return this.label.LastButton;
+    }
+    
+    get buttonPrevLabel() {
+        return this.label.PreviousButton;
+    }
+    
+    get buttonNextLabel() {
+        return this.label.NextButton;
+    }
+    
+    get pageTotalCount() {
+        return Math.ceil(Number(Math.min(this.recordCountTotal,this.filteredRecordCount))/Number(this._recordCountPerPage));
+    }
+
+    get isFirstPage() {
+        return (this._pageCurrentNumber === 1);
+    }
+
+    get isLastpage() {
+        return (this._pageCurrentNumber >= this.pageTotalCount);
+    }
+
+    get isOnlyOnePage() {
+        return (this.pageTotalCount === 1);
+    }
+
+    get isShowButtonFirstLast() {
+        return this.showFirstLastButtons;
+    }
+
+    get isPagination() {
+        return this.showPagination;
+    }
+
+    get isShowNewheader() {
+        return (this.isShowSearchBar || this.showPagination);
+    }
+
+    get pageFooterAlignment() {
+        return 'Left';
+    }
+
+    @api
+    get paginatedData() {
+        return this._paginatedData;
+    }
+    set paginatedData(value = this._mydata) {
+        this._paginatedData = value;
+    }
+    _paginatedData;
+
+    @api paginatedSelectedRows = [];
+    // End pagination Attributes
+
+    // Pagination Methods
+    initiatePagination() {
+        if (this.isPagination) {
+            this.recordCountPerPage = Math.max(this.recordsPerPage,1);
+        }
+    }
+
+    handleRecordCountChange(event) {
+        this.recordCountPerPage = event.detail.value;
+        this.pageCurrentNumber = 1; // TODO: Change to set to whatever the page would be to still display whatever the first record was previously
+        this.handlePagination();
+    }
+
+    handlePageChange(event) {
+        this.pageCurrentNumber = event.detail.value;
+    }
+
+    handleButtonFirst() {
+        this.pageCurrentNumber = 1;
+    }
+
+    handleButtonPrev() {
+        this.pageCurrentNumber--;
+    }
+    
+    handleButtonNext() {
+        this.pageCurrentNumber++;
+    }
+    
+    handleButtonLast() {
+        this.pageCurrentNumber = this.pageTotalCount;
+    }
+    
+    handlePagination() {
+        if (this.isPagination) {
+            let firstRecord = (this._pageCurrentNumber - 1) * this._recordCountPerPage;
+            let lastRecord = Math.min( (this._pageCurrentNumber * this._recordCountPerPage), this.recordCountTotal );
+            this.paginatedData = this.mydata.slice(firstRecord,lastRecord);
+            let sids = [];
+            this.allSelectedRowIds.forEach(srowid => {
+                const selRow = this._paginatedData.find(d => d[this.keyField] === srowid);
+                sids.push(srowid);
+            });
+            this.visibleSelectedRowIds = [...sids];
+        } else {
+            this.paginatedData = [...this._mydata];
+            this.visibleSelectedRowIds = this._allSelectedRowIds;
+        }
+    }
+    // End Pagination Methods
 
     get formElementClass() {
         return this.isInvalid ? 'slds-form-element slds-has-error' : 'slds-form-element';
@@ -452,7 +843,8 @@ export default class Datatable extends LightningElement {
 
     get formattedTableLabel() {
         let filteredCount = (this.filteredRecordCount != this.tableRecordCount) ? `${this.filteredRecordCount} of ` : '';
-        return (this.showRecordCount) ? `${this.tableLabel} (${filteredCount}${this.tableRecordCount})` : this.tableLabel;
+        let selectedCount = (this.showSelectedCount) ? ` • ${this.numberOfRowsSelected} selected` : '';
+        return (this.showRecordCount) ? `${this._tableLabel} (${filteredCount}${this.tableRecordCount}${selectedCount})` : this._tableLabel;
     }
 
     get tableRecordCount() {
@@ -460,12 +852,11 @@ export default class Datatable extends LightningElement {
     }
 
     get filteredRecordCount() {
-        return this.mydata.length;
+        return this._mydata.length;
     }
 
     get isShowTable() {
-        return this.mydata.length > 0 || this.isFiltered;
-        // return this._tableData.length > 0;
+        return this._mydata.length > 0 || this.isFiltered;
     }
 
     get haveRecords() {
@@ -486,7 +877,7 @@ export default class Datatable extends LightningElement {
         } else if (error) {
             // An error is expected here if the running user does not have Read access to the datatable SObject
             // All picklist values will be used instead of just those specified by the supplied Record Type Id
-            console.log('getPicklistValuesByRecordType wire service returned error: ' + JSON.stringify(error));
+            console.log(this.consoleLogPrefix+'getPicklistValuesByRecordType wire service returned error: ' + JSON.stringify(error));
         }
         if (data != undefined || error != undefined) {
             // Update row data for lookup, time, picklist and percent fields
@@ -537,9 +928,9 @@ export default class Datatable extends LightningElement {
         // Display the component version number in the console log
         const logStyleText = 'color: green; font-size: 16px';
         const logStyleNumber = 'color: red; font-size: 16px';
-        console.log("%cdatatable VERSION_NUMBER: %c"+CONSTANTS.VERSION_NUMBER, logStyleText, logStyleNumber);
-        console.log('MYDOMAIN', MYDOMAIN);
-
+        console.log("%cDATATABLE VERSION_NUMBER: %c"+CONSTANTS.VERSION_NUMBER, logStyleText, logStyleNumber);
+        console.log(this.consoleLogPrefix+'MYDOMAIN', MYDOMAIN);
+        
         // Picklist field processing
         if (!this.recordTypeId) this.recordTypeId = this.masterRecordTypeId;
         
@@ -557,21 +948,22 @@ export default class Datatable extends LightningElement {
             this.columnCellAttribs = decodeURIComponent(this.columnCellAttribs);
             this.columnTypeAttribs = decodeURIComponent(this.columnTypeAttribs);
             this.columnOtherAttribs = decodeURIComponent(this.columnOtherAttribs);
-            console.log("Config Mode Input columnAlignments:", this.columnAlignments);
-            console.log("Config Mode Input columnEdits:", this.columnEdits);
-            console.log("Config Mode Input columnFilters:", this.columnFilters);
-            console.log("Config Mode Input columnIcons:", this.columnIcons);
-            console.log("Config Mode Input columnLabels:", this.columnLabels);
-            console.log("Config Mode Input columnWidths:", this.columnWidths);
-            console.log("Config Mode Input columnWraps:", this.columnWraps);
-            console.log("Config Mode Input columnFlexes:", this.columnFlexes);
-            console.log("Config Mode Input columnFields:", this.columnFields);
-            console.log("Config Mode Input columnCellAttribs:", this.columnCellAttribs);
-            console.log("Config Mode Input columnTypeAttribs:", this.columnTypeAttribs);
-            console.log("Config Mode Input columnOtherAttribs:", this.columnOtherAttribs);
-            // this.not_suppressNameFieldLink = false;
+            console.log(this.consoleLogPrefix+"Config Mode Input columnAlignments:", this.columnAlignments);
+            console.log(this.consoleLogPrefix+"Config Mode Input columnEdits:", this.columnEdits);
+            console.log(this.consoleLogPrefix+"Config Mode Input columnFilters:", this.columnFilters);
+            console.log(this.consoleLogPrefix+"Config Mode Input columnIcons:", this.columnIcons);
+            console.log(this.consoleLogPrefix+"Config Mode Input columnLabels:", this.columnLabels);
+            console.log(this.consoleLogPrefix+"Config Mode Input columnWidths:", this.columnWidths);
+            console.log(this.consoleLogPrefix+"Config Mode Input columnWraps:", this.columnWraps);
+            console.log(this.consoleLogPrefix+"Config Mode Input columnFlexes:", this.columnFlexes);
+            console.log(this.consoleLogPrefix+"Config Mode Input columnFields:", this.columnFields);
+            console.log(this.consoleLogPrefix+"Config Mode Input columnCellAttribs:", this.columnCellAttribs);
+            console.log(this.consoleLogPrefix+"Config Mode Input columnTypeAttribs:", this.columnTypeAttribs);
+            console.log(this.consoleLogPrefix+"Config Mode Input columnOtherAttribs:", this.columnOtherAttribs);
+            this.not_suppressNameFieldLink = false;
         }
-        console.log('tableDataString - ',this._tableDataString, this.isUserDefinedObject);
+
+        console.log(this.consoleLogPrefix+'tableDataString - ',(SHOW_DEBUG_INFO) ? this._tableDataString : '***', this.isUserDefinedObject);
 
         if (this.isUserDefinedObject) {
             this.assignApexDefinedRecords();
@@ -582,16 +974,20 @@ export default class Datatable extends LightningElement {
             this.maxNumberOfRows = CONSTANTS.MAXROWCOUNT;
         }
 
-        console.log('this._tableData',this._tableData);
-        if(!this._tableData) {
+        // Pagination Initiation
+        this.initiatePagination();
+
+        console.log(this.consoleLogPrefix+'this._tableData',(SHOW_DEBUG_INFO) ? this._tableData : '***');
+
+        if (!this._tableData) {
             this.isUpdateTable = false;
             this._tableData = [];
         }
 
-        let max = Math.min(CONSTANTS.MAXROWCOUNT, this.maxNumberOfRows);
-        let cnt = Math.min(this._tableData.length, max);
+        // let max = Math.min(CONSTANTS.MAXROWCOUNT, this.maxNumberOfRows);
+        // let cnt = Math.min(this._tableData.length, max);
         this.isUpdateTable = false;
-        this._tableData = [...this._tableData].slice(0,cnt);
+        this._tableData = [...this._tableData].slice(0,this.collectionSize);
 
         // Set roundValue for setting Column Widths in Config Mode
         this.roundValueLabel = `Snap each Column Width to the Nearest ${CONSTANTS.ROUNDWIDTH} pixel Boundary`;
@@ -599,7 +995,7 @@ export default class Datatable extends LightningElement {
         // Get array of column field API names
         this.columnArray = (this.columnFields.length > 0) ? this.columnFields.replace(/\s/g, '').split(',') : [];
         this.columnFieldParameter = this.columnArray.join(', ');
-        console.log('columnArray - ',this.columnArray);  
+        console.log(this.consoleLogPrefix+'columnArray - ',this.columnArray);  
 
         // JSON Version - Build basicColumns default values
         if (this.isUserDefinedObject) {
@@ -619,7 +1015,7 @@ export default class Datatable extends LightningElement {
         parseAlignments.forEach(align => {
             this.alignments.push({
                 column: this.columnReference(align),
-                alignment: this.columnValue(align)
+                alignment: columnValue(align)
             });
         });
 
@@ -629,7 +1025,7 @@ export default class Datatable extends LightningElement {
             this.attribCount = (parseEdits.findIndex(f => f.search(':') != -1) != -1) ? 0 : 1;
             this.editAttribType = 'none';
             parseEdits.forEach(edit => {
-                let colEdit = (this.columnValue(edit).toLowerCase() == 'true') ? true : false;
+                let colEdit = (columnValue(edit).toLowerCase() == 'true') ? true : false;
                 this.edits.push({
                     column: this.columnReference(edit),
                     edit: colEdit
@@ -647,7 +1043,7 @@ export default class Datatable extends LightningElement {
             this.attribCount = (parseFilters.findIndex(f => f.search(':') != -1) != -1) ? 0 : 1;
             this.filterAttribType = 'none';
             parseFilters.forEach(filter => {
-                let colFilter = (this.columnValue(filter).toLowerCase() == 'true') ? true : false;
+                let colFilter = (columnValue(filter).toLowerCase() == 'true') ? true : false;
                 let col = this.columnReference(filter);
                 this.filters.push({
                     column: col,
@@ -670,42 +1066,42 @@ export default class Datatable extends LightningElement {
         parseIcons.forEach(icon => {
             this.icons.push({
                 column: this.columnReference(icon),
-                icon: this.columnValue(icon)
+                icon: columnValue(icon)
             });
         });
 
         // Parse Column Label attribute
-        const parseLabels = (this.columnLabels.length > 0) ? this.removeSpaces(this.columnLabels).split(',') : [];
+        const parseLabels = (this.columnLabels.length > 0) ? removeSpaces(this.columnLabels).split(',') : [];
         this.attribCount = (parseLabels.findIndex(f => f.search(':') != -1) != -1) ? 0 : 1;
         parseLabels.forEach(label => {
             this.labels.push({
                 column: this.columnReference(label),
-                label: this.columnValue(label)
+                label: columnValue(label)
             });
         });
 
         if (this.isUserDefinedObject) {
 
             // JSON Version - Parse Column Scale attribute
-            const parseScales = (this.columnScales.length > 0) ? this.removeSpaces(this.columnScales).split(',') : [];
+            const parseScales = (this.columnScales.length > 0) ? removeSpaces(this.columnScales).split(',') : [];
             this.attribCount = (parseScales.findIndex(f => f.search(':') != -1) != -1) ? 0 : 1;
             parseScales.forEach(scale => {
                 this.scales.push({
                     column: this.columnReference(scale),
-                    scale: this.columnValue(scale)
+                    scale: columnValue(scale)
                 });
-                this.basicColumns[this.columnReference(scale)].scale = this.columnValue(scale);
+                this.basicColumns[this.columnReference(scale)].scale = columnValue(scale);
             });
 
             // JSON Version - Parse Column Type attribute
-            const parseTypes = (this.columnTypes.length > 0) ? this.removeSpaces(this.columnTypes).split(',') : [];
+            const parseTypes = (this.columnTypes.length > 0) ? removeSpaces(this.columnTypes).split(',') : [];
             this.attribCount = (parseTypes.findIndex(f => f.search(':') != -1) != -1) ? 0 : 1;
             parseTypes.forEach(type => {
                 this.types.push({
                     column: this.columnReference(type),
-                    type: this.columnValue(type)
+                    type: columnValue(type)
                 });
-                this.basicColumns[this.columnReference(type)].type = this.columnValue(type);
+                this.basicColumns[this.columnReference(type)].type = columnValue(type);
             });
         }
 
@@ -715,7 +1111,7 @@ export default class Datatable extends LightningElement {
         parseWidths.forEach(width => {
             this.widths.push({
                 column: this.columnReference(width),
-                width: parseInt(this.columnValue(width))
+                width: parseInt(columnValue(width))
             });
         });
 
@@ -725,7 +1121,7 @@ export default class Datatable extends LightningElement {
             this.attribCount = (parseFlexes.findIndex(f => f.search(':') != -1) != -1) ? 0 : 1;
             this.flexAttribType = 'none';
             parseFlexes.forEach(flex => {
-                let colFlex = (this.columnValue(flex).toLowerCase() == 'true') ? true : false;
+                let colFlex = (columnValue(flex).toLowerCase() == 'true') ? true : false;
                 this.flexes.push({
                     column: this.columnReference(flex),
                     flex: colFlex
@@ -743,37 +1139,37 @@ export default class Datatable extends LightningElement {
         parseWraps.forEach(wrap => {
             this.wraps.push({
                 column: this.columnReference(wrap),
-                wrap: (this.columnValue(wrap).toLowerCase() == 'true') ? true : false
+                wrap: (columnValue(wrap).toLowerCase() == 'true') ? true : false
             });
         });
 
         // Parse Column CellAttribute attribute (Because multiple attributes use , these are separated by ;)
-        const parseCellAttribs = (this.columnCellAttribs.length > 0) ? this.removeSpaces(this.columnCellAttribs).split(';') : [];
+        const parseCellAttribs = (this.columnCellAttribs.length > 0) ? removeSpaces(this.columnCellAttribs).split(';') : [];
         this.attribCount = 0;   // These attributes must specify a column number or field API name
         parseCellAttribs.forEach(cellAttrib => {
             this.cellAttribs.push({
                 column: this.columnReference(cellAttrib),
-                attribute: this.columnValue(cellAttrib)
+                attribute: columnValue(cellAttrib)
             });
         });
 
         // Parse Column Other Attributes attribute (Because multiple attributes use , these are separated by ;)
-        const parseOtherAttribs = (this.columnOtherAttribs.length > 0) ? this.removeSpaces(this.columnOtherAttribs).split(';') : [];
+        const parseOtherAttribs = (this.columnOtherAttribs.length > 0) ? removeSpaces(this.columnOtherAttribs).split(';') : [];
         this.attribCount = 0;   // These attributes must specify a column number or field API name
         parseOtherAttribs.forEach(otherAttrib => {
             this.otherAttribs.push({
                 column: this.columnReference(otherAttrib),
-                attribute: this.columnValue(otherAttrib)
+                attribute: columnValue(otherAttrib)
             });
         });
 
         // Parse Column TypeAttribute attribute (Because multiple attributes use , these are separated by ;)
-        const parseTypeAttribs = (this.columnTypeAttribs.length > 0) ? this.removeSpaces(this.columnTypeAttribs).split(';') : [];
+        const parseTypeAttribs = (this.columnTypeAttribs.length > 0) ? removeSpaces(this.columnTypeAttribs).split(';') : [];
         this.attribCount = 0;   // These attributes must specify a column number or field API name
         parseTypeAttribs.forEach(ta => {
             this.typeAttribs.push({
                 column: this.columnReference(ta),
-                attribute: this.columnValue(ta)
+                attribute: columnValue(ta)
             });
         });
 
@@ -781,7 +1177,7 @@ export default class Datatable extends LightningElement {
         if (!this.allowOverflow) {
             this.tableHeightAttribute = 'height:' + this.tableHeight;
         }
-        console.log('tableHeightAttribute',this.tableHeightAttribute);
+        console.log(this.consoleLogPrefix+'tableHeightAttribute',this.tableHeightAttribute);
 
         // Set table border display
         //this.borderClass = (this.tableBorder == true) ? 'slds-box' : ''; commented out to remove padding. replaced with below
@@ -796,7 +1192,7 @@ export default class Datatable extends LightningElement {
             // Set other initial values here
             this.wizColumnFields = this.columnFields;
 
-            console.log('Processing Datatable');
+            console.log(this.consoleLogPrefix+'Processing Datatable');
             this.processDatatable();
             this.isUpdateTable = true;      // Added in v4.1.1 so Datatable will show records from Datafetcher upon initialization          
 
@@ -808,49 +1204,13 @@ export default class Datatable extends LightningElement {
 
     assignApexDefinedRecords() {
         // JSON input attributes
-        console.log('tableDataString - ',this._tableDataString);
+        console.log(this.consoleLogPrefix+'tableDataString - ',(SHOW_DEBUG_INFO) ? this._tableDataString : '***');
         if (!this._tableDataString || this._tableDataString?.length == 0) {
             this._tableDataString = '[{"'+this.keyField+'":"(empty table)"}]';
-            this.columnFields = this.keyField;
-            this.columnTypes = [];
-            this.columnScales = [];
         }
         this._tableData = JSON.parse(this._tableDataString);
-        console.log('tableData - ',this._tableData);    
+        console.log(this.consoleLogPrefix+'tableData - ',(SHOW_DEBUG_INFO) ? this._tableData : '***');
         this.preSelectedRows = (this.preSelectedRowsString.length > 0) ? JSON.parse(this.preSelectedRowsString) : [];  
-    }
-    
-    removeSpaces(string) {
-        return string
-            .replace(/, | ,/g,',')
-            .replace(/: | :/g,':')
-            .replace(/{ | {/g,'{')
-            .replace(/} | }/g,'}')
-            .replace(/; | ;/g,';');
-    }
-
-    columnReference(attrib) {
-        // The column reference can be either the field API name or the column sequence number (1,2,3 ...)
-        // If no column reference is specified, the values are assigned to columns in order (There must be a value provided for each column)
-        // Return the actual column # (0,1,2 ...)
-        let colRef = 0;
-        if (this.attribCount == 0) {
-            let colDescriptor = attrib.split(':')[0];
-            colRef = Number(colDescriptor)-1;
-            if (isNaN(colRef)) {
-                colRef = this.columnArray.indexOf(colDescriptor);
-                colRef = (colRef != -1) ? colRef : 999; // If no match for the field name, set to non-existent column #
-            }
-        } else {
-            colRef = this.attribCount-1;
-            this.attribCount += 1;
-        }
-        return colRef;
-    }
-
-    columnValue(attrib) {
-        // Extract the value from the column attribute
-        return attrib.slice(attrib.search(':')+1);
     }
 
     processDatatable() {
@@ -900,7 +1260,8 @@ export default class Datatable extends LightningElement {
             // Custom column processing
             this.updateColumns();
 
-            if(this.cols[0]?.fieldName.endsWith('_lookup')) {
+            const firstCol = (this.isRemoveRowAction && this.removeRowLeftOrRight == "Left") ? 1 : 0;
+            if(this.cols[firstCol]?.fieldName.endsWith('_lookup')) {
                 this.sortedBy = this.cols[0].fieldName;
                 this.doSort(this.sortedBy, 'asc');
             }
@@ -928,7 +1289,7 @@ export default class Datatable extends LightningElement {
             }
 
             let fieldList = (this.columnFields.length > 0) ? this.columnFields.replace(/\s/g, '') : ''; // Remove spaces
-            console.log('Passing data to Apex Controller', data);
+            console.log(this.consoleLogPrefix+'Passing data to Apex Controller', (SHOW_DEBUG_INFO) ? data : '***');
             getReturnResults({ records: data, fieldNames: fieldList, suppressCurrencyConversion: this.suppressCurrencyConversion })
             .then(result => {
                 let returnResults = JSON.parse(result);
@@ -936,21 +1297,22 @@ export default class Datatable extends LightningElement {
                 // Assign return results from the Apex callout
                 this.recordData = [...returnResults.rowData];
                 this.lookups = returnResults.lookupFieldList;
+                console.log(this.consoleLogPrefix+"Lookup Fields ~ returnResults.lookupFieldList.toString()", returnResults.lookupFieldList.toString());
                 this.percentFieldArray = (returnResults.percentFieldList.length > 0) ? returnResults.percentFieldList.toString().split(',') : [];
                 this.numberFieldArray = (returnResults.numberFieldList.length > 0) ? returnResults.numberFieldList.toString().split(',') : [];
                 this.timeFieldArray = (returnResults.timeFieldList.length > 0) ? returnResults.timeFieldList.toString().split(',') : [];
                 this.datetimeFieldArray = (returnResults.datetimeFieldList.length > 0) ? returnResults.datetimeFieldList.toString().split(',') : [];
-                console.log("Datetime Fields ~ returnResults.datetimeFieldList.toString()", returnResults.datetimeFieldList.toString());
+                console.log(this.consoleLogPrefix+"Datetime Fields ~ returnResults.datetimeFieldList.toString()", returnResults.datetimeFieldList.toString());
                 this.picklistFieldArray = (returnResults.picklistFieldList.length > 0) ? returnResults.picklistFieldList.toString().split(',') : [];
                 this.picklistReplaceValues = (this.picklistFieldArray.length > 0);  // Flag value dependent on if there are any picklists in the datatable field list  
                 this.apex_picklistFieldMap = returnResults.picklistFieldMap;
-                console.log("Picklist Fields ~ this.apex_picklistFieldMap", this.apex_picklistFieldMap);
+                console.log(this.consoleLogPrefix+"Picklist Fields ~ this.apex_picklistFieldMap", this.apex_picklistFieldMap);
                 this.dateFieldArray = (returnResults.dateFieldList.length > 0) ? returnResults.dateFieldList.toString().split(',') : [];
                 this.objectNameLookup = returnResults.objectName;
                 this.objectLinkField = returnResults.objectLinkField;
                 this.lookupFieldArray = JSON.parse('[' + returnResults.lookupFieldData + ']');
                 this.timezoneOffset = returnResults.timezoneOffset.replace(/[^\d-]/g, '');  // Numeric characters and - only
-                console.log("Timezone Offset ~ this.timezoneOffset", this.timezoneOffset);
+                console.log(this.consoleLogPrefix+"Timezone Offset ~ this.timezoneOffset", this.timezoneOffset);
 
                 // Check for differences in picklist API Values vs Labels
                 if (this.picklistReplaceValues) {
@@ -968,7 +1330,7 @@ export default class Datatable extends LightningElement {
                 // Basic column info (label, fieldName, type) taken from the Schema in Apex
                 this.dtableColumnFieldDescriptorString = '[' + returnResults.dtableColumnFieldDescriptorString + ']';
                 this.basicColumns = JSON.parse(this.dtableColumnFieldDescriptorString);
-                console.log('dtableColumnFieldDescriptorString',this.dtableColumnFieldDescriptorString, this.basicColumns);
+                console.log(this.consoleLogPrefix+'dtableColumnFieldDescriptorString',this.dtableColumnFieldDescriptorString, this.basicColumns);
                 this.noEditFieldArray = (returnResults.noEditFieldList.length > 0) ? returnResults.noEditFieldList.toString().split(',') : [];
                 
                 // *** Moved to @wire ***
@@ -985,7 +1347,7 @@ export default class Datatable extends LightningElement {
 
             })  // Handle any errors from the Apex Class
             .catch(error => {
-                console.log('getReturnResults error is: ' + JSON.stringify(error));
+                console.log(this.consoleLogPrefix+'getReturnResults error is: ' + JSON.stringify(error));
                 if (error.body) {
                     this.errorApex = 'Apex Action error: ' + error.body.message;
                     alert(this.errorApex + '\n');  // Present the error to the user
@@ -995,12 +1357,19 @@ export default class Datatable extends LightningElement {
             });
 
         }
+        
+        // Other processing for reactivity
+
+        // Clear all existing column filters
+        this.columnFilterValues = [];
+        this.showClearFilterButton = false;
+
     }
 
     updateDataRows() {
         // Process Incoming Data Collection
-        console.log('Processing updateDataRows')
-        let data = (this.recordData) ? JSON.parse(JSON.stringify([...this.recordData])) : [];
+        console.log(this.consoleLogPrefix+'Processing updateDataRows')
+        let data = (this.recordData) ? JSON.parse(JSON.stringify([...this.recordData].slice(0,this.collectionSize))) : [];
         let lookupFields = this.lookups;
         let lufield = '';
         let timeFields = this.timeFieldArray;
@@ -1029,8 +1398,8 @@ export default class Datatable extends LightningElement {
             // Adjust date with offset based on User's timezone
             dateFields.forEach(date => {
                 if (record[date]) {
-                    let dt = Date.parse(record[date] + "T12:00:00.000Z");   //Set to Noon to avoid DST issues with the offset (v4.0.4)
-                    if (!isNaN(dt)) {
+                    let dt = Date.parse(record[date] + "T12:00:00.000Z");   // Set to Noon to avoid DST issues with the offset (v4.0.4)
+                    if (!isNaN(dt)) {   // Dates from External Objects are already formatted as Datetime (PR#1529)
                         let d = new Date();
                         record[date] = new Date(d.setTime(Number(dt) - Number(this.timezoneOffset)));
                     }
@@ -1059,7 +1428,9 @@ export default class Datatable extends LightningElement {
             lookupFields.forEach(lookup => {
                 if (this.isUserDefinedObject) {
                     lufield = lookup;
-                    record[lufield + '_lookup'] = MYDOMAIN + record[lufield + '_lookup'];                    
+                    if(record[lufield]) {
+                        record[lufield + '_lookup'] = MYDOMAIN + record[lufield + '_lookup'];
+                    }                   
                 } else {
                     if(lookup.toLowerCase().endsWith('id')) {
                         lufield = lookup.replace(/Id$/gi,'');
@@ -1081,17 +1452,21 @@ export default class Datatable extends LightningElement {
                             record[lufield + '_lookup'] = MYDOMAIN + '.lightning.force.com/lightning/r/' + lookupFieldObject['object'] + '/' + record[lufield + '_id'] + '/view';
                         }
                     }
+
+                    delete record[lufield];     // v4.3.3 remove object reference so selected rows output will work with reactive collection processors
                 }
             }); 
             
             // Handle Lookup for the SObject's "Name" Field
-            record[this.objectLinkField + '_name'] = record[this.objectLinkField];
-            if (ISCOMMUNITY) {
-                record[this.objectLinkField + '_lookup'] = MYDOMAIN + 'detail/' + record['Id'];
-            } else if (ISFLOWBUILDER) {
-                record[this.objectLinkField + '_lookup'] = MYDOMAIN + '/' + record['Id'];
-            } else {
-                record[this.objectLinkField + '_lookup'] = MYDOMAIN + '.lightning.force.com/lightning/r/' + this.objectNameLookup + '/' + record['Id'] + '/view';                
+            if (!this.isUserDefinedObject || this.isConfigMode) {
+                record[this.objectLinkField + '_name'] = record[this.objectLinkField];
+                if (ISCOMMUNITY) {
+                    record[this.objectLinkField + '_lookup'] = MYDOMAIN + 'detail/' + record['Id'];
+                } else if (ISFLOWBUILDER) {
+                    record[this.objectLinkField + '_lookup'] = MYDOMAIN + '/' + record['Id'];
+                } else {
+                    record[this.objectLinkField + '_lookup'] = MYDOMAIN + '.lightning.force.com/lightning/r/' + this.objectNameLookup + '/' + record['Id'] + '/view';                
+                }
             }
 
             // Handle replacement of Picklist API Names with Labels
@@ -1115,20 +1490,25 @@ export default class Datatable extends LightningElement {
 
         // Set table data attributes
         this.mydata = [...data];
-        this.savePreEditData = [...this.mydata];
+        this.savePreEditData = [...this._mydata];
         this.editedData = JSON.parse(JSON.stringify([...this._tableData]));  // Must clone because cached items are read-only
-        console.log('selectedRows',this.selectedRows);
-        console.log('keyField:',this.keyField);
-        console.log('tableData',this._tableData);
-        console.log('mydata:',this.mydata);
+        this.outputRemainingRows = [...this._editedData];
+        this.dispatchEvent(new FlowAttributeChangeEvent('outputRemainingRows', this._outputRemainingRows));
+        console.log(this.consoleLogPrefix+'allSelectedRowIds',(SHOW_DEBUG_INFO) ? this.allSelectedRowIds : '***');
+        console.log(this.consoleLogPrefix+'keyField:',(SHOW_DEBUG_INFO) ? this.keyField : '***');
+        console.log(this.consoleLogPrefix+'tableData',(SHOW_DEBUG_INFO) ? this._tableData : '***');
+        console.log(this.consoleLogPrefix+'mydata:',(SHOW_DEBUG_INFO) ? this._mydata : '***');
+        console.log(this.consoleLogPrefix+'outputRemainingRows:',(SHOW_DEBUG_INFO) ? this._outputRemainingRows : '***');
     }
 
     updateColumns() {
         // Parse column definitions
-        console.log('Processing updateColumns')
+        console.log(this.consoleLogPrefix+'Processing updateColumns')
         this.cols = [];
         let columnNumber = 0;
         let lufield = '';
+
+        if (!this.isConfigMode && this.isRemoveRowAction && this.removeRowLeftOrRight == "Left") this.addRemoveRowAction();
 
         this.basicColumns.forEach(colDef => {
 
@@ -1234,7 +1614,7 @@ export default class Datatable extends LightningElement {
             // Update Flex attribute overrides by column
             switch (this.flexAttribType) {
                 case 'cols':
-                    flexAttrib.flex = this.flexes.find(i => i['column'] == columnNumber);
+                    flexAttrib.flex = this.flexes.find(i => i['column'] == columnNumber)?.flex || false;
                     break;
                 case 'all': 
                     flexAttrib.flex = true;
@@ -1244,9 +1624,9 @@ export default class Datatable extends LightningElement {
             }
 
             if (this.isConfigMode) { 
-                let wizardAlignLeft = (!alignmentAttrib) ? (this.convertType(type) != 'number') : (alignment == 'left');
+                let wizardAlignLeft = (!alignmentAttrib) ? (convertType(type) != 'number') : (alignment == 'left');
                 let wizardAlignCenter = (!alignmentAttrib) ? false : (alignment == 'center');
-                let wizardAlignRight = (!alignmentAttrib) ? (this.convertType(type) == 'number') : (alignment == 'right');
+                let wizardAlignRight = (!alignmentAttrib) ? (convertType(type) == 'number') : (alignment == 'right');
                 let wizardEdit = (!editAttrib) ? false : (editAttrib.edit || false);
                 let wizardFilter = filterAttrib.filter || false;
                 let wizardFlex = (!flexAttrib) ? false : (flexAttrib.flex || false);
@@ -1399,7 +1779,6 @@ export default class Datatable extends LightningElement {
                 wrapText: (wrapAttrib) ? wrapAttrib.wrap : false,
                 flex: (flexAttrib) ? flexAttrib.flex : false
             });
-            console.log('this.cols',this.cols);
 
             // Update Other Attributes attribute overrides by column
             this.parseAttributes('other',this.otherAttribs,columnNumber);
@@ -1408,15 +1787,47 @@ export default class Datatable extends LightningElement {
             columnNumber += 1;
         });
 
-        this.columns = this.cols;
+        if (!this.isConfigMode && this.isRemoveRowAction && this.removeRowLeftOrRight != "Left") this.addRemoveRowAction();
 
+        this.columns = this.cols;
+        console.log(this.consoleLogPrefix+'this.columns',this.columns);
+
+    }
+
+    addRemoveRowAction() {
+        // Add a special column with for a remove row action
+        this.cols.push({
+            type: "button-icon",
+            label: null,
+            fieldName: "rowAction",
+            typeAttributes: {
+                name: "removeRow",
+                alternativeText: this.removeLabel,
+                iconName: this.removeIcon,
+                tooltip: this.removeLabel,
+                variant: "border",
+                size: "medium",
+                disabled: false
+            },
+            cellAttributes: {
+                class: this.removeColor
+            },      
+            editable: false,
+            actions: null,
+            sortable: false,
+            hideDefaultActions: true,  
+            initialWidth: 50,
+            wrapText: false,
+            flex: false
+        });
+        this.removeRowActionColNum = this.cols.length - 1;
     }
 
     updatePreSelectedRows() {
         // Handle pre-selected records
         if(!this.outputSelectedRows || this.outputSelectedRows.length === 0) {
             this.outputSelectedRows = this.preSelectedRows.slice(0, this.maxNumberOfRows);
-        
+
             this.updateNumberOfRowsSelected(this.outputSelectedRows);
             if (this.isUserDefinedObject) {
                 this.outputSelectedRowsString = JSON.stringify(this.outputSelectedRows);                                        //JSON Version
@@ -1424,15 +1835,38 @@ export default class Datatable extends LightningElement {
             } else {
                 this.dispatchEvent(new FlowAttributeChangeEvent('outputSelectedRows', this.outputSelectedRows));
             }    
-            const selected = JSON.parse(JSON.stringify([...this.preSelectedRows]));
+            const selected = JSON.parse(JSON.stringify([...this.preSelectedRows.slice(0, this.maxNumberOfRows)]));
             let selectedKeys = [];
             selected.forEach(record => {
                 selectedKeys.push(record[this.keyField]);            
             });
-            this.selectedRows = selectedKeys;
+            this.allSelectedRowIds = selectedKeys;
+            this.visibleSelectedRowIds = selectedKeys;
             this.preSelectedRows = [];
             this.dispatchEvent(new FlowAttributeChangeEvent('preSelectedRows', this.preSelectedRows));
         }
+    }
+
+    columnReference(attrib) {
+        // The column reference can be either the field API name or the column sequence number (1,2,3 ...)
+        // If no column reference is specified, the values are assigned to columns in order (There must be a value provided for each column)
+        // Return the actual column # (0,1,2 ...)
+        let colRef = 0;
+        if (this.attribCount == 0) {
+            let colDescriptor = attrib.split(':')[0];
+            if (colDescriptor.endsWith('_lookup')) {
+                colDescriptor = colDescriptor.slice(0,colDescriptor.lastIndexOf('_lookup'));   
+            } 
+            colRef = Number(colDescriptor)-1;
+            if (isNaN(colRef)) {
+                colRef = this.columnArray.indexOf(colDescriptor);
+                colRef = (colRef != -1) ? colRef : 999; // If no match for the field name, set to non-existent column #
+            }
+        } else {
+            colRef = this.attribCount-1;
+            this.attribCount += 1;
+        }
+        return colRef;
     }
 
     parseAttributes(propertyType,inputAttributes,columnNumber) {
@@ -1440,7 +1874,7 @@ export default class Datatable extends LightningElement {
         let result = [];
         let fullAttrib = inputAttributes.find(i => i['column'] == columnNumber);
         if (fullAttrib) {
-            let attribSplit = this.removeSpaces(fullAttrib.attribute.slice(1,-1)).split(',');
+            let attribSplit = removeSpaces(fullAttrib.attribute.slice(1,-1)).split(',');
             attribSplit.forEach(ca => {
                 let subAttribPos = ca.search('{');
                 if (subAttribPos != -1) {
@@ -1485,20 +1919,66 @@ export default class Datatable extends LightningElement {
 
     handleRowAction(event) {
         // Process the row actions here
-        const action = event.detail.action;
+        const action = event.detail.action.name;
         const row = JSON.parse(JSON.stringify(event.detail.row));
         const keyValue = row[this.keyField];
-        this.mydata = this.mydata.map(rowData => {
-            if (rowData[this.keyField] === keyValue) {
-                switch (action.name) {
-                    // case 'action': goes here
-                        //
-                        // break;
-                    default:
+        console.log(this.consoleLogPrefix+"handleRowAction ~ action, keyValue:", action, (SHOW_DEBUG_INFO) ? keyValue : '***');
+
+        switch (action) {
+            
+            case 'removeRow':
+
+                if (this.maxRemovedRows == 0 || this.numberOfRowsRemoved < this.maxRemovedRows) {
+
+                    // Add to removed row collection and update counter
+                    this.outputRemovedRows = [...this.outputRemovedRows, row];  // Removed row collection will be in order of removal, not original order
+                    this.numberOfRowsRemoved ++;
+
+                    // handle selected rows
+                    const index = this._allSelectedRowIds.indexOf(keyValue);
+                    if (index != -1) {
+                        this._allSelectedRowIds.splice(index, 1);
+                    }
+
+                    // handle edited & remaining rows
+                    this.savePreEditData = [...removeRowFromCollection(this, this._savePreEditData, keyValue)];
+                    this.outputEditedRows = [...removeRowFromCollection(this, this.outputEditedRows, keyValue)];
+                    this.outputRemainingRows = [...removeRowFromCollection(this, this._outputRemainingRows, keyValue)];
+                    this.dispatchEvent(new FlowAttributeChangeEvent('outputEditedRows', this.outputEditedRows));
+                    this.dispatchEvent(new FlowAttributeChangeEvent('numberOfRowsEdited', this.outputEditedRows.length));
+                    this.dispatchEvent(new FlowAttributeChangeEvent('outputRemovedRows', this.outputRemovedRows));
+                    this.dispatchEvent(new FlowAttributeChangeEvent('numberOfRowsRemoved', this.numberOfRowsRemoved));
+                    this.dispatchEvent(new FlowAttributeChangeEvent('outputRemainingRows', this._outputRemainingRows));
+                    
+                    this.dispatchOutputs();
+
+                    // remove record from collection
+                    this.mydata = removeRowFromCollection(this, this._mydata, keyValue);
+
+                    if (this.mydata.length == 0) {  // Last record was removed from the datatable
+                        // clear last selected row
+                        this.outputSelectedRows = [];
+                        if (!this.isUserDefinedObject) {
+                            this.dispatchEvent(new FlowAttributeChangeEvent('outputSelectedRows', this.outputSelectedRows));
+                        } else {
+                            this.outputSelectedRowsString = JSON.stringify(this.outputSelectedRows);
+                            this.dispatchEvent(new FlowAttributeChangeEvent('outputSelectedRowsString', this.outputSelectedRowsString));  
+                        }
+                        this.updateNumberOfRowsSelected(this.outputSelectedRows);
+                        // refresh table
+                        this.tableData = [];
+                    }
+
+                    if (this.numberOfRowsRemoved === this.maxRemovedRows) {
+                        this.columns[this.removeRowActionColNum].typeAttributes["disabled"] = "";
+                    }
+
                 }
-            }
-            return rowData;
-        });
+                break;
+
+            default:
+        }
+
     }
 
     //handle change on combobox
@@ -1543,7 +2023,7 @@ export default class Datatable extends LightningElement {
         let editField = '';
 
         // Apply drafts to mydata
-        let data = [...this.mydata];
+        let data = [...this._mydata];
         data = data.map(item => {
             const draft = draftValues.find(d => d[this.keyField] == item[this.keyField]);
             if (draft != undefined) {
@@ -1559,7 +2039,7 @@ export default class Datatable extends LightningElement {
         });
 
         // Apply drafts to editedData
-        let edata = [...this.editedData];
+        let edata = [...this._editedData];
         edata = edata.map(eitem => {
             const edraft = draftValues.find(d => d[this.keyField] == eitem[this.keyField]);
             if (edraft != undefined) {
@@ -1608,7 +2088,7 @@ export default class Datatable extends LightningElement {
                 timefield.forEach(time => {
                     if (!this.suppressBottomBar || (time == editField)) {
                         if (field[time]) {
-                            field[time] = this.convertTime(field[time]);
+                            field[time] = convertTime(this, field[time]);
                         }
                     }
                 });                
@@ -1626,25 +2106,44 @@ export default class Datatable extends LightningElement {
                             }
                         }
                         catch(err) {
-                            console.log("Date not in ISO format", date, field[date]);
+                            console.log(this.consoleLogPrefix+"Date not in ISO format", date, field[date]);
                         }
                     }
                 });
 
-                this.outputEditedRows = [...this.outputEditedRows,eitem];     // Add to output attribute collection
+                const isRemovedBeforeSave = this.outputRemovedRows.some(rr => rr[this.keyField] === eitem[this.keyField]);
+                if (!isRemovedBeforeSave) {
+                    this.outputEditedRows = [...this.outputEditedRows,eitem];     // Add to output attribute collection
+                }
+
+                this.outputRemainingRows = replaceRowInCollection(this, this._outputRemainingRows, this.outputEditedRows, eitem[this.keyField]);
             }
             return eitem;
         }); 
         
+        // Apply edits to savePreEditData - v4.3.3
+        let sdata = [...this._savePreEditData];
+        sdata = sdata.map(sitem => {
+            const sdraft = edata.find(d => d[this.keyField] == sitem[this.keyField]);
+            if (sdraft != undefined) {
+                let sfieldNames = Object.keys(sdraft);
+                sfieldNames.forEach(sf => {
+                    sitem[sf] = sdraft[sf];
+                });
+            }
+            return sitem;
+        });
+
         this.isUpdateTable = false;
         this.dispatchEvent(new FlowAttributeChangeEvent('outputEditedRows', this.outputEditedRows));
         this.dispatchEvent(new FlowAttributeChangeEvent('numberOfRowsEdited', this.outputEditedRows.length));
+        this.dispatchEvent(new FlowAttributeChangeEvent('outputRemainingRows', this._outputRemainingRows));
         if(this.isSerializedRecordData) {
             this.outputEditedSerializedRows = JSON.stringify(this.outputEditedRows);
             this.dispatchEvent(new FlowAttributeChangeEvent('outputEditedSerializedRows', this.outputEditedSerializedRows));
         }
 
-        this.savePreEditData = [...data];   // Resave the current table values
+        this.savePreEditData = [...sdata];   // Resave the current table values  // v4.3.3
         this.mydata = [...data];            // Reset the current table values
 
         if (!this.suppressBottomBar) {
@@ -1662,41 +2161,77 @@ export default class Datatable extends LightningElement {
 
     cancelChanges(event) {
         // Only used with inline editing
-        this.mydata = [...this.savePreEditData];
-    }
-
-    convertTime(dtValue) {
-        // Return a Salesforce formatted time value based a datetime value
-        const dtv = new Date(dtValue);
-        const hours = dtv.getHours() - (this.timezoneOffset / 2880000);
-        let timeString = ("00"+hours).slice(-2)+":";
-        timeString += ("00"+dtv.getMinutes()).slice(-2)+":";
-        timeString += ("00"+dtv.getSeconds()).slice(-2)+".";
-        timeString += ("000"+dtv.getMilliseconds()).slice(-3);
-        timeString += "Z";
-        return timeString;
+        this.mydata = [...this._savePreEditData];
     }
 
     handleRowSelection(event) {
-        // Only used with row selection
-        // Update values to be passed back to the Flow
+        // Added in v4.2.1 - Pagination - Persist previously selected rows that are not displayed on the currently visible page
         let currentSelectedRows = event.detail.selectedRows;
-        this.updateNumberOfRowsSelected(currentSelectedRows);
+        let otherSelectedRowIds = [];
+        let currentSelectedRowIds = [];
+        let allSelectedRecs = [];
+        let index = -1;
+
+        currentSelectedRows.forEach(selrow => {
+            const prevsel = this._allSelectedRowIds.some(id => id === selrow[this.keyField]);
+            if (!prevsel) {
+                this.allSelectedRowIds = [...this._allSelectedRowIds, selrow[this.keyField]];
+            }
+        })
+        this._allSelectedRowIds.forEach(srowid => {
+            const found = findRowIndexById(this, this._paginatedData, srowid) != -1;
+            if (!found) {
+                if (findRowIndexById(this, this.outputRemovedRows, srowid) == -1) {
+                        otherSelectedRowIds.push(srowid);
+                        index = findRowIndexById(this, this._savePreEditData, srowid);
+                        if (index != -1) {  // Equals -1 if a previously selected row is no longer part of the current table data (reactivity)
+                            allSelectedRecs.push(this._savePreEditData[index]);
+                        }
+                    } else {    // Selected row was removed
+                        index = findRowIndexById(this, allSelectedRecs, srowid);
+                        allSelectedRecs.splice(index, 1);
+                    }
+                } else {
+                const stillSelected = findRowIndexById(this, currentSelectedRows, srowid) != -1;
+                if (stillSelected) {
+                    currentSelectedRowIds.push(srowid);
+                    index = findRowIndexById(this, currentSelectedRows, srowid);
+                    allSelectedRecs.push(currentSelectedRows[index]);
+                }
+            }
+        });       
+
+        this.allSelectedRowIds = [...currentSelectedRowIds, ...otherSelectedRowIds];
+        this.outputSelectedRows = [];
+        if (allSelectedRecs) {  // Keep selected rows in the same order as the original table
+            this._savePreEditData.forEach(rec => {   // Check all records - mydata would just be the filtered records here
+                const isSelected = allSelectedRecs.some(srec => srec[this.keyField] === rec[this.keyField] && srec[this.keyField] !== undefined && rec[this.keyField] !== undefined );   // PR1575 ignore when keyfield is not a valid field
+                if (isSelected) {
+                    this.outputSelectedRows = [...this.outputSelectedRows, rec];
+                }
+            });
+        }
+
+        this.dispatchEvent(new FlowAttributeChangeEvent('outputSelectedRows', this.outputSelectedRows));
+        this.updateNumberOfRowsSelected(this.outputSelectedRows);
         this.setIsInvalidFlag(false);
         if(this.isRequired && this.numberOfRowsSelected == 0) {
             this.setIsInvalidFlag(true);
         }
         // this.isUpdateTable = false;      // Commented out in v4.1.1
-        this.outputSelectedRows = [...currentSelectedRows];
-        this.dispatchEvent(new FlowAttributeChangeEvent('outputSelectedRows', this.outputSelectedRows));
-        this.outputSelectedRowsString = JSON.stringify(this.outputSelectedRows);
-        this.dispatchEvent(new FlowAttributeChangeEvent('outputSelectedRowsString', this.outputSelectedRowsString));       
+        if (this.isUserDefinedObject) {
+            this.outputSelectedRowsString = JSON.stringify(this.outputSelectedRows);
+            this.dispatchEvent(new FlowAttributeChangeEvent('outputSelectedRowsString', this.outputSelectedRowsString)); 
+        }      
     }
 
     updateNumberOfRowsSelected(currentSelectedRows) {
         // Handle updating output attribute for the number of selected rows
         this.numberOfRowsSelected = currentSelectedRows.length;
         this.dispatchEvent(new FlowAttributeChangeEvent('numberOfRowsSelected', this.numberOfRowsSelected));
+        if (this.numberOfRowsSelected == 0) {
+            this.showClearButton = false;
+        }
         // Return an SObject Record if just a single row is selected
         this.outputSelectedRow = (this.numberOfRowsSelected == 1) ? currentSelectedRows[0] : null;
         this.dispatchEvent(new FlowAttributeChangeEvent('outputSelectedRow', this.outputSelectedRow));
@@ -1709,13 +2244,16 @@ export default class Datatable extends LightningElement {
 
     handleClearSelection() {
         this.showClearButton = false;
-        this.selectedRows = [];
-        this.outputSelectedRows = this.selectedRows;
-        this.outputSelectedRowsString = '';
+        this.allSelectedRowIds = [];
+        this.visibleSelectedRowIds = [];
+        this.outputSelectedRows = [];
         this.updateNumberOfRowsSelected(this.outputSelectedRows);
         this.isUpdateTable = false;
         this.dispatchEvent(new FlowAttributeChangeEvent('outputSelectedRows', this.outputSelectedRows));
-        this.dispatchEvent(new FlowAttributeChangeEvent('outputSelectedRowsString', this.outputSelectedRowsString));
+        if (this.isUserDefinedObject) {
+            this.outputSelectedRowsString = '';
+            this.dispatchEvent(new FlowAttributeChangeEvent('outputSelectedRowsString', this.outputSelectedRowsString));
+        }
     }
 
     handleClearFilterButton() {
@@ -1727,16 +2265,17 @@ export default class Datatable extends LightningElement {
         });
 
         // Reapply filters (none in place)
+        this.filterColumnData();// v4.3.3 promise/resolve clears selected rows
         this.isWorking = true;
-        new Promise((resolve, reject) => {
-            setTimeout(() => {
-                this.filterColumnData();
-                resolve();
-            }, 0);
-        })
-        .then(
-            () => this.isWorking = false
-        );
+        // new Promise((resolve, reject) => {
+        //     setTimeout(() => {
+        //         this.filterColumnData();
+        //         resolve();
+        //     }, 0);
+        // })
+        // .then(
+        //     () => this.isWorking = false
+        // );
 
         colNumber = 0;
         this.columns.forEach(col => {   // Disable all column Clear header actions and reset Labels
@@ -1753,7 +2292,7 @@ export default class Datatable extends LightningElement {
 
     updateColumnSorting(event) {
         // Handle column sorting
-        console.log('Sort:',event.detail.fieldName,event.detail.sortDirection);
+        console.log(this.consoleLogPrefix+'Sort:',event.detail.fieldName,event.detail.sortDirection);
         this.sortedBy = event.detail.fieldName;
         this.sortDirection = event.detail.sortDirection;
         this.isUpdateTable = false;
@@ -1763,6 +2302,24 @@ export default class Datatable extends LightningElement {
     }
 
     doSort(sortField, sortDirection) {
+
+        // Determine if column type will allow field values to be converted to lower case
+        let isString = false;
+        if (this.isCaseInsensitiveSort) {
+            const colType = this.columns.find(c => c.fieldName == sortField).type;
+            switch (colType) {
+                case 'phone':
+                case 'text':
+                case 'email':
+                case 'url':
+                case 'richtext':
+                case 'combobox':
+                    isString = true;
+                    break;
+                default:
+            }
+        }
+        
         // Change sort field from Id to Name for lookups
         if (sortField.endsWith('_lookup')) {
             sortField = sortField.slice(0,sortField.lastIndexOf('_lookup')) + '_name';   
@@ -1773,9 +2330,15 @@ export default class Datatable extends LightningElement {
         this.isWorking = true;
         new Promise((resolve, reject) => {
             setTimeout(() => {
-                this.mydata = [...this.mydata.sort(
-                    (a,b)=>(a=fieldValue(a),b=fieldValue(b),reverse*((a>b)-(b>a)))
-                )];
+                if (this.isCaseInsensitiveSort && isString) {
+                    this.mydata = [...this._mydata.sort(
+                        (a,b)=>(a=fieldValue(a).toLowerCase(),b=fieldValue(b).toLowerCase(),reverse*((a>b)-(b>a)))
+                    )];
+                } else {
+                    this.mydata = [...this._mydata.sort(
+                        (a,b)=>(a=fieldValue(a),b=fieldValue(b),reverse*((a>b)-(b>a)))
+                    )];
+                }
                 resolve();
             }, 0);
         })
@@ -1873,8 +2436,9 @@ export default class Datatable extends LightningElement {
                 this.columnFilterValue = this.columnFilterValues[this.columnNumber];
                 this.columnFilterValue = (this.columnFilterValue) ? this.columnFilterValue : this.baseLabel;
                 this.columnType = 'richtext';
-                this.inputType = this.convertType(this.columnType);
-                this.inputFormat = (this.inputType == 'number') ? this.convertFormat(this.columnType) : null;
+                this.inputType = convertType(this.columnType);
+                this.inputFormat = (this.inputType == 'number') ? convertFormat(this.columnType) : null;
+                this.isFilterDialog = false;
                 this.handleOpenFilterInput();
                 break;
 
@@ -1882,9 +2446,10 @@ export default class Datatable extends LightningElement {
                 this.columnFilterValue = this.columnFilterValues[this.columnNumber];
                 this.columnFilterValue = (this.columnFilterValue) ? this.columnFilterValue : null;
                 this.columnType = colDef.type;
-                this.inputType = this.convertType(this.columnType);
+                this.inputType = convertType(this.columnType);
                 this.inputType = (this.inputType == 'url') ? 'text' : this.inputType;
-                this.inputFormat = (this.inputType == 'number') ? this.convertFormat(this.columnType) : null;
+                this.inputFormat = (this.inputType == 'number') ? convertFormat(this.columnType) : null;
+                this.isFilterDialog = true;
                 this.handleOpenFilterInput();
                 break;
 
@@ -1896,16 +2461,17 @@ export default class Datatable extends LightningElement {
                     this.updateLabelParam();
                 }
 
-                this.isWorking = true;
-                new Promise((resolve, reject) => {
-                    setTimeout(() => {
-                        this.filterColumnData();
-                        resolve();
-                    }, 0);
-                })
-                .then(
-                    () => this.isWorking = false
-                );
+                this.filterColumnData();    // v4.3.3 promise/resolve clears selected rows
+                // this.isWorking = true;
+                // new Promise((resolve, reject) => {
+                //     setTimeout(() => {
+                //         this.filterColumnData();
+                //         resolve();
+                //     }, 0);
+                // })
+                // .then(
+                //     () => this.isWorking = false
+                // );
 
                 this.filterColumns[this.columnNumber].actions.find(a => a.name == 'clear_'+this.columnNumber).disabled = true;
                 if (this.sortedBy != undefined) {
@@ -1917,53 +2483,6 @@ export default class Datatable extends LightningElement {
         }
 
         this.columns = [...this.filterColumns];
-    }
-
-    convertType(colType) {
-        // Set Input Type based on column Data Type
-        switch(colType) {
-            case 'boolean':
-                return 'text';
-            case 'date':
-                return 'date';
-            case 'date-local':
-                return 'date';
-            case 'datetime':
-                return 'datetime';
-            case 'time':
-                return 'time';
-            case 'email':
-                return 'email';
-            case 'phone':
-                return 'tel';
-            case 'url':
-                return 'url';
-            case 'number':
-                return 'number';
-            case 'currency':
-                return 'number';
-            case 'percent':
-                return 'number';
-            case 'number':
-                return 'number';                
-            case 'text':
-                return 'text';
-            default:
-                return 'richtext';
-        }
-    }
-
-    convertFormat(colType) {
-        // Set Input Formatter value for different number types
-        switch(colType) {
-            case 'currency':
-                return 'currency';
-            case 'percent':
-                // return 'percent-fixed';  // This would be to enter 35 to get 35% (0.35)
-                return 'percent';
-            default:
-                return null;
-        }
     }
 
     handleResize(event) {
@@ -1988,8 +2507,15 @@ export default class Datatable extends LightningElement {
         let colString = '';
         let colWidthsTotal = 0;
         let colFlexWidth = 0;
+        // TODO: Refactor & condense flex width logic from v4.3.1 
         this.basicColumns.forEach(colDef => {
-            colFlexWidth = this.columns[colNum].actions?.find(a => a.name == 'flex_'+colNum)?.checked ? 0 : sizes[colNum];
+            colFlexWidth = this.columns[colNum].actions?.find(a => a.name == 'flex_'+colNum)?.checked ? 0 : (sizes[colNum] == 0 && this.isConfigMode ? DEFAULT_COL_WIDTH : sizes[colNum]);   // v4.3.1 Reset column width when Flex is toggled off
+            if (sizes[colNum] == 0 && this.isConfigMode) {
+                this.flexes.push({
+                    column: colNum,
+                    flex: false
+                });
+            }
             this.columns[colNum]['initialWidth'] = colFlexWidth;
             if (this.filterColumns) {
                 this.filterColumns[colNum]['initialWidth'] = colFlexWidth;
@@ -2004,7 +2530,7 @@ export default class Datatable extends LightningElement {
         this.columnWidthsLabel = `Column Data`;
     }
 
-    handleChange(event) {
+    handleFilterChange(event) {
         // Update the filter value as the user types it in
         this.columnFilterValue = event.target.value;
         this.columnFilterValues[this.columnNumber] = this.columnFilterValue;
@@ -2097,19 +2623,27 @@ export default class Datatable extends LightningElement {
     handleOpenFilterInput() {
         // Display the input dialog for the filter value
         this.saveOriginalValue = this.columnFilterValue;
+        this.isFilterBlankValues = (this.columnFilterValue == FILTER_BLANKS) ? true : false;
         this.isOpenFilterInput = true;
     }
 
     handleCommit() {
         // Handle the filter input when the user clicks out of the input dialog
-        if (this.columnFilterValue != null) {
+        if (this.columnFilterValue != null || this.isFilterBlankValues) {
             this.handleCloseFilterInput();
         }
+    }
+
+    handleFilterBlankChange() {
+        this.isFilterBlankValues = !this.isFilterBlankValues;
+        this.columnFilterValue = (this.isFilterBlankValues) ? FILTER_BLANKS : '';
+        this.columnFilterValues[this.columnNumber] = this.columnFilterValue;
     }
 
     handleCloseFilterInput() {
         // Close the input dialog and handle the new column filter value
         this.isOpenFilterInput = false; 
+        this.isFilterBlankValues = false;
         if (this.columnType == 'boolean') {
             let firstChar = this.columnFilterValue.substring(0, 1).toLowerCase();
             if (firstChar == 't' || firstChar == 'y' || firstChar == '1') { // True, Yes, 1 - allow multiple ways to select a True value
@@ -2126,7 +2660,10 @@ export default class Datatable extends LightningElement {
             this.filterColumns[this.columnNumber].label = this.columnFilterValue;
             this.updateLabelParam();
         } else {
-            this.filterColumns[this.columnNumber].label = this.baseLabel + ' [' + this.columnFilterValue + ']';
+            this.filterColumns[this.columnNumber].label = this.baseLabel;
+            if (this.columnFilterValue != null && this.columnFilterValue != '') {
+                this.filterColumns[this.columnNumber].label += this.headerFilterValue;
+            }
         }
         this.columnFilterValues[this.columnNumber] = this.columnFilterValue;
         // Force a redisplay of the datatable with the filter value shown in the column header
@@ -2151,7 +2688,7 @@ export default class Datatable extends LightningElement {
         new Promise((resolve, reject) => {
             setTimeout(() => {
                 if (!this.isConfigMode) {
-                    const rows = [...this.savePreEditData];
+                    const rows = [...this._savePreEditData];
                     const cols = this.columnFilterValues;
                     let filteredRows = [];
                     rows.forEach(row => {
@@ -2162,77 +2699,85 @@ export default class Datatable extends LightningElement {
                                 fieldName = fieldName.slice(0,fieldName.lastIndexOf('_lookup')) + '_name';   
                             }
                             if (this.columnFilterValues[col] && this.columnFilterValues[col] != null) {
-                                if (this.filterColumns[col].type != 'boolean' && (!row[fieldName] || row[fieldName] == null)) {    // No match because the field is empty
-                                    match = false;
-                                    break; 
-                                }                   
-                                
-                                switch(this.filterColumns[col].type) {
-                                    case 'number':
-                                    case 'currency':
-                                    case 'percent':
-                                        if (row[fieldName] != this.columnFilterValues[col]) {    // Check for exact match on numeric fields
-                                            match = false;
-                                            break;                                
+                                if (this.filterColumns[col].type != 'boolean' && (!row[fieldName] || row[fieldName] == null)) {    // The field is empty
+                                    if (this.columnFilterValues[col] != FILTER_BLANKS) {
+                                        match = false;
+                                        break; 
+                                    }
+                                } else {
+                                    if (this.columnFilterValues[col] != FILTER_BLANKS) { 
+                                        switch(this.filterColumns[col].type) {
+                                            case 'number':
+                                            case 'currency':
+                                            case 'percent':
+                                                if (row[fieldName] != this.columnFilterValues[col]) {    // Check for exact match on numeric fields
+                                                    match = false;
+                                                    break;                                
+                                                }
+                                                break;
+                                            case 'date-local':
+                                                let dl = row[fieldName];
+                                                let dtf = new Intl.DateTimeFormat('en', {
+                                                    year: 'numeric',
+                                                    month: '2-digit',
+                                                    day: '2-digit'
+                                                });
+                                                const [{value: mo}, , {value: da}, , {value: ye}] = dtf.formatToParts(dl);
+                                                let formatedDate = `${ye}-${mo}-${da}`;
+                                                if (formatedDate != this.columnFilterValues[col]) {    // Check for date match on date & time fields
+                                                    match = false;
+                                                    break;                                
+                                                }
+                                                break;
+                                            case 'date':
+                                            case 'datetime':
+                                            case 'time':
+                                                if (typeof(row[fieldName]) === typeof(+1)) { 
+                                                    match = false;
+                                                    break;  // TODO - Figure out a way to filter on Time fields
+                                                }
+                                                let dt = row[fieldName].slice(0,10);
+                                                if (dt != this.columnFilterValues[col]) {    // Check for date match on date & time fields
+                                                    match = false;
+                                                    break;                                
+                                                }
+                                                break;
+                                            default:
+                                                let fieldValue = row[fieldName]?.toString() + '';
+                                                let filterValue = this.columnFilterValues[col];
+                                                if (!this.matchCaseOnFilters) {
+                                                    fieldValue = fieldValue.toLowerCase();
+                                                    filterValue = filterValue.toLowerCase();
+                                                }
+                                                if (fieldValue.search(filterValue) == -1) {  // Check for filter value within field value
+                                                    match = false;
+                                                    break;
+                                                }                            
                                         }
-                                        break;
-                                    case 'date-local':
-                                        let dl = row[fieldName];
-                                        let dtf = new Intl.DateTimeFormat('en', {
-                                            year: 'numeric',
-                                            month: '2-digit',
-                                            day: '2-digit'
-                                        });
-                                        const [{value: mo}, , {value: da}, , {value: ye}] = dtf.formatToParts(dl);
-                                        let formatedDate = `${ye}-${mo}-${da}`;
-                                        if (formatedDate != this.columnFilterValues[col]) {    // Check for date match on date & time fields
-                                            match = false;
-                                            break;                                
-                                        }
-                                        break;
-                                    case 'date':
-                                    case 'datetime':
-                                    case 'time':
-                                        if (typeof(row[fieldName]) === typeof(+1)) { 
-                                            match = false;
-                                            break;  //TODO - Figure out a way to filter on Time fields
-                                        }
-                                        let dt = row[fieldName].slice(0,10);
-                                        if (dt != this.columnFilterValues[col]) {    // Check for date match on date & time fields
-                                            match = false;
-                                            break;                                
-                                        }
-                                        break;
-                                    default:
-                                        let fieldValue = row[fieldName].toString();
-                                        let filterValue = this.columnFilterValues[col];
-                                        if (!this.matchCaseOnFilters) {
-                                            fieldValue = fieldValue.toLowerCase();
-                                            filterValue = filterValue.toLowerCase();
-                                        }
-                                        if (fieldValue.search(filterValue) == -1) {  // Check for filter value within field value
-                                            match = false;
-                                            break;
-                                        }                            
-                                }
+                                    } else {
+                                        match = false;
+                                    }
+                                }                  
                                     this.isFiltered = true;
                                     this.filterColumns[col].actions.find(a => a.name == 'clear_'+col).disabled = false;
                             } else {
-                                this.filterColumns[col].actions.find(a => a.name == 'clear_'+col).disabled = true;
+                                if (this.filterColumns[col].actions && this.filterColumns[col].actions != null) {   // *** v4.2.1 fix ***
+                                    this.filterColumns[col].actions.find(a => a.name == 'clear_'+col).disabled = true;
+                                }
                             }
                         }
                         if (match) {
                             filteredRows.push(row);
                         }
                     });
-                    this.mydata = filteredRows;
+                    this.mydata = [...filteredRows];    // v4.3.3
                 }
                 resolve();
             }, 0);
         })
         .then(
             () => {
-                this.filteredData = [...this.mydata];
+                this.filteredData = [...this._mydata];
                 if (this.searchTerm && this.searchTerm != null) {
                     this.searchRowData(this.searchTerm)
                 };
@@ -2250,18 +2795,18 @@ export default class Datatable extends LightningElement {
             new Promise((resolve, reject) => {
                 setTimeout(() => {
                     if (!this.isConfigMode) {
-                        const rows = this.filteredData.length > 0 ? [...this.filteredData] : [...this.savePreEditData];
+                        const rows = this._filteredData.length > 0 ? [...this._filteredData] : [...this._savePreEditData];
                         const cols = this.columns;
                         let filteredRows = [];
                         rows.forEach(row => {
                             let match = false;
                             for (let col = 0; col < cols.length; col++) {
                                 let fieldName = cols[col].fieldName;
-                                if (fieldName.endsWith('_lookup')) {
+                                if (fieldName?.endsWith('_lookup')) {
                                     fieldName = fieldName.slice(0,fieldName.lastIndexOf('_lookup')) + '_name';   
                                 }
-                                
-                                if (cols[col].type != 'boolean' && (!row[fieldName] || row[fieldName] == null)) {    // No match because the field is empty
+
+                                if (cols[col].type != 'boolean' && (!row[fieldName] || row[fieldName] == null)) {    // No match because the field is boolean or empty or it's a row action
                                     continue; 
                                 }                   
 
@@ -2292,7 +2837,7 @@ export default class Datatable extends LightningElement {
                                     case 'datetime':
                                     case 'time':
                                         if (typeof(row[fieldName]) === typeof(+1)) { 
-                                            break;  //TODO - Figure out a way to filter on Time fields
+                                            break;  // TODO - Figure out a way to filter on Time fields
                                         }
                                         let dt = row[fieldName].slice(0,10);
                                         if (dt == searchTerm) {    // Check for date match on date & time fields
@@ -2332,7 +2877,7 @@ export default class Datatable extends LightningElement {
         } else {    // Empty search term
             new Promise((resolve, reject) => {
                 setTimeout(() => {
-                    this.mydata = this.filteredData.length > 0 ? [...this.filteredData] : [...this.savePreEditData];
+                    this.mydata = this._filteredData.length > 0 ? [...this._filteredData] : [...this._savePreEditData];
                     resolve();
                 }, 0);
             })
@@ -2348,7 +2893,7 @@ export default class Datatable extends LightningElement {
         // Create the Alignment Label parameter for Config Mode
         let colString = '';
         this.filterColumns.forEach(colDef => {
-            let configAlign = (this.convertType(colDef['type']) != 'number') ? 'left' : 'right';
+            let configAlign = (convertType(colDef['type']) != 'number') ? 'left' : 'right';
             let currentAlign = colDef['cellAttributes']['alignment'];
             if (currentAlign && (currentAlign != configAlign)) {
                 colString = colString + ', ' + colDef['fieldName'] + ':' + colDef['cellAttributes']['alignment'];
@@ -2455,9 +3000,29 @@ export default class Datatable extends LightningElement {
         this.isAllFilter = allSelected;
     }
 
+    dispatchOutputs() {
+        if (this.isUserDefinedObject) {
+            this.outputSelectedRowsString = JSON.stringify(this.outputSelectedRows);                                        //JSON Version
+            this.outputEditedRowsString = JSON.stringify(this.outputEditedRows);   
+            this.outputEditedSerializedRows = JSON.stringify(this.outputEditedRows);                                         //JSON Version
+            this.outputRemovedRowsString = JSON.stringify(this.outputRemovedRows); 
+            this.outputRemainingRowsString = JSON.stringify(this._outputRemainingRows); 
+            this.dispatchEvent(new FlowAttributeChangeEvent('outputSelectedRowsString', this.outputSelectedRowsString));
+            this.dispatchEvent(new FlowAttributeChangeEvent('outputEditedRowsString', this.outputEditedRowsString));
+            this.dispatchEvent(new FlowAttributeChangeEvent('outputEditedSerializedRows', this.outputEditedSerializedRows));
+            this.dispatchEvent(new FlowAttributeChangeEvent('outputRemovedRowsString', this.outputRemovedRowsString));
+            this.dispatchEvent(new FlowAttributeChangeEvent('outputRemainingRowsString', this.outputRemainingRowsString));
+        }
+
+        if(this.isSerializedRecordData) {
+            this.outputEditedSerializedRows = JSON.stringify(this.outputEditedRows);
+            this.dispatchEvent(new FlowAttributeChangeEvent('outputEditedSerializedRows', this.outputEditedSerializedRows));
+        }
+    }
+
     @api
     validate() {
-        console.log("validate and exit");
+        console.log(this.consoleLogPrefix+"validate and exit");
 
         // Finalize Selected Records for Output
         let sdata = [];
@@ -2469,45 +3034,13 @@ export default class Datatable extends LightningElement {
         this.outputSelectedRows = [...sdata]; // Set output attribute values
         this.dispatchEvent(new FlowAttributeChangeEvent('outputSelectedRows', this.outputSelectedRows));
         this.updateNumberOfRowsSelected(this.outputSelectedRows);   // Winter '23 Patch 12 fix
-        
-/*      // Validate Edited Rows
-        let errorMessage = '';
-        this.outputEditedRows.forEach(erow => {
-            let fieldNames = Object.keys(erow);
-            fieldNames.forEach(fld => {
-                const basic = this.basicColumns.find(b => b.fieldName == fld);
-                if (basic?.type.includes("text")) {
-                    if (erow[fld]?.length > basic.length) {
-                        let errorRow = this.mydata.findIndex(d => d[this.keyField] == erow[this.keyField]) + 1;
-                        errorMessage += `The value for ${fld} in Row #${errorRow} is ${erow[fld]?.length} characters long.  The maximum allowed length is ${basic.length} characters.\n`;                        
-                    }
-                }
-            });
-        });
-        if (errorMessage) {
-            this.setIsInvalidFlag(true);
-            return { 
-                isValid: false, 
-                errorMessage: errorMessage 
-            }; 
-        } */
-        
-        if (this.isUserDefinedObject) {
-            this.outputSelectedRowsString = JSON.stringify(this.outputSelectedRows);                                        //JSON Version
-            this.outputEditedRowsString = JSON.stringify(this.outputEditedRows);   
-            this.outputEditedSerializedRows = JSON.stringify(this.outputEditedRows);                                         //JSON Version
-            this.dispatchEvent(new FlowAttributeChangeEvent('outputSelectedRowsString', this.outputSelectedRowsString));
-            this.dispatchEvent(new FlowAttributeChangeEvent('outputEditedRowsString', this.outputEditedRowsString));
-            this.dispatchEvent(new FlowAttributeChangeEvent('outputEditedSerializedRows', this.outputEditedSerializedRows));
-        }
 
-        if(this.isSerializedRecordData) {
-            this.outputEditedSerializedRows = JSON.stringify(this.outputEditedRows);
-            this.dispatchEvent(new FlowAttributeChangeEvent('outputEditedSerializedRows', this.outputEditedSerializedRows));
-        }
+        this.dispatchOutputs();
 
-        console.log('outputSelectedRows', this.outputSelectedRows.length, this.outputSelectedRows);
-        console.log('outputEditedRows',this.outputEditedRows.length, this.outputEditedRows);
+        console.log(this.consoleLogPrefix+'outputSelectedRows', this.outputSelectedRows.length, (SHOW_DEBUG_INFO) ? this.outputSelectedRows : '***');
+        console.log(this.consoleLogPrefix+'outputEditedRows', this.outputEditedRows.length, (SHOW_DEBUG_INFO) ? this.outputEditedRows : '***');
+        console.log(this.consoleLogPrefix+'outputRemovedRows', this.outputRemovedRows.length, (SHOW_DEBUG_INFO) ? this.outputRemovedRows : '***');
+        console.log(this.consoleLogPrefix+'outputRemainingRows', this.outputRemainingRows.length, (SHOW_DEBUG_INFO) ? this._outputRemainingRows : '***');
 
         // Validation logic to pass back to the Flow
         if(!this.isRequired || this.numberOfRowsSelected > 0) { 

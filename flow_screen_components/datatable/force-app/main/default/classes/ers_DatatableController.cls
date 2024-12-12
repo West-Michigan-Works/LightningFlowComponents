@@ -47,12 +47,15 @@
  *                  3/14/22	    Version 3.5.0   Added option to suppress the currency conversion introduced in v3.1.1
  *                  9/6/22	    Version 4.0.9   Return a collection of datetime fields for handling in the LWC
  *                  11/12/23    Version 4.1.5   Identify all datetime fields even if they are not in the Datatable (Needed to support reactive Collection Processors)
+ *                  02/28/24    Version 4.2.0   Fix install issue if the target org has a class named "Test"
  */
 @SuppressWarnings('PMD.ClassNamingConventions')
 
 public with sharing class ers_DatatableController {
     @TestVisible
     private static Boolean isMultiCurrencyOrganization = UserInfo.isMultiCurrencyOrganization();
+    private static Boolean SHOW_DEBUG_INFO = false;
+    private static String DEBUG_INFO_PREFIX = 'DATATABLE: ';
 
     /**
      * this is just a convenient way to return multiple unique pieces of data to the component
@@ -97,7 +100,9 @@ public with sharing class ers_DatatableController {
         cpeRR.objectLabel = objDescribe.getLabel();
         cpeRR.objectPluralLabel = objDescribe.getLabelPlural();
         cpeRR.objectIconName = getIconName(objName);
-        System.debug(LoggingLevel.INFO, 'cpeRR - ' + JSON.serializePretty(cpeRR));
+        if (SHOW_DEBUG_INFO) {
+            System.debug(LoggingLevel.INFO, 'cpeRR - ' + JSON.serializePretty(cpeRR));
+        }
         return JSON.serialize(cpeRR);
     }
 
@@ -107,9 +112,11 @@ public with sharing class ers_DatatableController {
         String fieldNames,
         Boolean suppressCurrencyConversion
     ) {
-        System.debug(LoggingLevel.INFO, 'records-' + records);
-        System.debug(LoggingLevel.INFO, 'fieldNames-' + fieldNames);
-        System.debug(LoggingLevel.INFO, 'suppressCurrencyConversion-' + suppressCurrencyConversion);
+        if (SHOW_DEBUG_INFO) {
+            System.debug(LoggingLevel.INFO, DEBUG_INFO_PREFIX + 'records-' + records);
+        }
+        System.debug(LoggingLevel.INFO, DEBUG_INFO_PREFIX + 'fieldNames-' + fieldNames);
+        System.debug(LoggingLevel.INFO, DEBUG_INFO_PREFIX + 'suppressCurrencyConversion-' + suppressCurrencyConversion);
         ReturnResults curRR = new ReturnResults();
         if (records.isEmpty()) {
             // throw new MyApexException ('The datatable record collection is empty');
@@ -150,7 +157,9 @@ public with sharing class ers_DatatableController {
             curRR.objectName = objName;
         }
         curRR.timezoneOffset = getTimezoneOffset().format();
-        System.debug(LoggingLevel.INFO, 'curRR - ' + JSON.serializePretty(curRR));
+        if (SHOW_DEBUG_INFO) {
+            System.debug(LoggingLevel.INFO, DEBUG_INFO_PREFIX + 'curRR - ' + JSON.serializePretty(curRR));
+        }
         return JSON.serialize(curRR);
     }
 
@@ -182,7 +191,7 @@ public with sharing class ers_DatatableController {
         List<String> numberFields = new List<String>();
         Map<String, Map<String, String>> picklistFieldLabels = new Map<String, Map<String, String>>();
         String objectLinkField = getNameUniqueField(objName); // Name (link) Field for the Datatable SObject
-        System.debug(LoggingLevel.INFO, '*** OBJ/LINK' + objName + '/' + objectLinkField);
+        System.debug(LoggingLevel.INFO, DEBUG_INFO_PREFIX + '*** OBJ/LINK' + objName + '/' + objectLinkField);
 
         Map<String, Schema.SObjectField> fieldMap = objDescribe.fields.getMap();
 
@@ -271,7 +280,7 @@ public with sharing class ers_DatatableController {
                     picklistFieldLabels.put(dfr.getName(), valueLabelPair);
                 }
                 when else {
-                    System.debug('No field type match');
+                    System.debug(DEBUG_INFO_PREFIX + 'No field type match: ' + dfr.getType().name());
                 }
             }
         }
@@ -344,7 +353,7 @@ public with sharing class ers_DatatableController {
             SObject[] recs = Database.query(
                 'SELECT Id, ' + nameField + ' FROM ' + obj + ' WHERE Id IN :ids'
             ); //NOPMD
-            System.debug(LoggingLevel.INFO, 'Name Field: ' + obj + ' - ' + nameField);
+            System.debug(LoggingLevel.INFO, DEBUG_INFO_PREFIX + 'Name Field: ' + obj + ' - ' + nameField);
             Map<Id, SObject> somap = new Map<Id, SObject>();         
             for (SObject so : recs) {
                 somap.put((Id) so.get('Id'), so);
@@ -389,7 +398,7 @@ public with sharing class ers_DatatableController {
             for (String currField : currencyFields) {
                 currencyFieldsQuery +=
                     ', ' +
-                    (Test.isRunningTest() ? currField : 'convertCurrency(' + currField + ')');
+                    (System.Test.isRunningTest() ? currField : 'convertCurrency(' + currField + ')');
             }
             currencyFieldsQuery += ' FROM ' + objName + ' WHERE Id IN :records';
             Map<Id, SObject> sobjCurrencyFields = new Map<Id, SObject>(
@@ -585,7 +594,7 @@ public with sharing class ers_DatatableController {
     // Thanks to Satya.2020 (https://developer.salesforce.com/forums/?id=9062I000000IQ3eQAG)
     @TestVisible
     private static String getIconName(String sObjectName) {
-        System.debug(LoggingLevel.INFO, 'Getting Icon for: ' + sObjectName);
+        System.debug(LoggingLevel.INFO, DEBUG_INFO_PREFIX + 'Getting Icon for: ' + sObjectName);
         String iconName;
         List<Schema.DescribeTabSetResult> tabSetDesc = Schema.describeTabs();
         List<Schema.DescribeTabResult> tabDesc = new List<Schema.DescribeTabResult>();
@@ -612,7 +621,7 @@ public with sharing class ers_DatatableController {
                 break;
             }
         }
-        System.debug(LoggingLevel.INFO, 'iconName: ' + iconName);
+        System.debug(LoggingLevel.INFO, DEBUG_INFO_PREFIX + 'iconName: ' + iconName);
         return iconName;
     }
 }

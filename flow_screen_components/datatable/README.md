@@ -34,7 +34,7 @@ Additional components packaged with this LWC:
 **Documentation:**  https://unofficialsf.com/datatable-lightning-web-component-for-flow-screens-2/ 
   
 **Created by:**	Eric Smith  
-**Date:**		2019 - 2023
+**Date:**		2019 - 2024
   
 LinkedIn: 	https://www.linkedin.com/in/ericrsmith2  
 Salesforce: https://trailblazer.me/id/ericsmith  
@@ -51,8 +51,8 @@ https://unofficialsf.com/flow-action-and-screen-component-basepacks/
   
 ---
 **Install Datatable**  
-[Version 4.1.6 (Production or Developer)](https://login.salesforce.com/packaging/installPackage.apexp?p0=04t5G000004XZk9QAG)   
-[Version 4.1.6 (Sandbox)](https://test.salesforce.com/packaging/installPackage.apexp?p0=04t5G000004XZk9QAG)
+[Version 4.3.4 (Production or Developer)](https://login.salesforce.com/packaging/installPackage.apexp?p0=04t5G000004fz9iQAA)   
+[Version 4.3.4 (Sandbox)](https://test.salesforce.com/packaging/installPackage.apexp?p0=04t5G000004fz9iQAA)
  
 ---
 **Starting with the Winter '21 Release, Salesforce requires that a User's Profile or Permission Set is given specific permission to access any @AuraEnabled Apex Method.**  
@@ -71,8 +71,80 @@ A Permission Set (**USF Flow Screen Component - Datatable**) is included with th
     
 ---
 # Release Notes 
-
-## 02/06/24 -  Eric Smith -    Version 4.1.6 
+  ## 11/24/24 -  Eric Smith -     Version 4.3.4  
+**Updates:**  
+-   Add option to sort columns as case insensitive (AbC vs ACb) - default false for backwards compatibility
+-   Update component API versions from 60.0 to 62.0
+  
+**Bug Fixes:** 
+-   Fixed bug where error would occur when the remove row action was in the first column  
+  
+  ## 11/21/24 -  Eric Smith -     Version 4.3.3  
+**Updates:**  
+-   Added option to column filters to filter rows where the value in that column is blank 
+-   Changed the minimum number of characters in the search term box to start searching from 2 to 1   
+  
+**Bug Fixes:** 
+-   Removed processing from 4.3.1 and 4.3.2 related to Winter 25 base component bug for flexible width columns  
+-   Fixed bug where lookup field columns were not holding the flex attribute  
+-   Fixed bug where changing or clearing a search or filter value after an edit wouldn't display all of the original records 
+-   Fixed bug where record selections would be cleared when filters were cleared  
+-   Fixed bug where wrong record links could be generated in a developer org  
+-   Fixed reactivity bug where an error could occur when a previously selected record was no longer included in the current record collection  
+-   Fixed bug where reactive collection processors would fail trying to read the selected rows collection when a lookup field was included  
+-   PR#1575 - Fernando-Fernandez - If keyfield is a field that doesn't actually exist, don't identify every record as selected  
+  
+## 09/29/24 -  Eric Smith -     Version 4.3.1 & 4.3.2  
+**Updates:**   
+-   Column headers will now Clip or Wrap based on the settings for the individual column 
+-   User's can no longer manually change the width of Flex enabled columns while interacting with the datatable  
+-  
+**Bug Fixes:** 
+-   Fixed bug introduced in Winter '25 affecting columns set with Flexible Widths enabled  
+  
+## 07/22/24 -  Eric Smith -     Version 4.3.0  
+**Updates:**   
+-   Added additional output attributes for Apex Defined records (outputRemovedRowsString & outputRemainingRowsString)  
+-   Added an option to display the number of selected records in the table header 
+-  
+**Bug Fixes:** 
+-   Fixed bug where first column reference was off if the remove row action was on the left 
+-  
+## 07/09/24 -  Eric Smith -     Version 4.2.1  
+**Updates:** 
+-   New Feature: Add a Remove Row action as the first or last column in a Datatable.  
+-       New outputs include a collection and a count of the removed rows.
+-       You can specify the icon and color for the action button.  
+-       You can specify the maximum number of rows that can be removed.  
+-   Selected Rows are now persistent when Paginating, Searching, Filtering, Sorting, and Removing!  
+-   A new output attribute (outputRemainingRows) will provide all records passed into the table with all edits made to those records, less all records (if any) that were removed  
+-   Implemented a default setting (SHOW_DEBUG_INFO = false) to hide record details from console and debug logs  
+-       Source code changes in ers_datatableUtils.js, ers_DatatableController.cls & ers_QueryNRecords.cls  
+-   Console.log statements are now identified with the Datatable's header label  
+  
+**Bug Fixes:** 
+-   Fixed bug where hyperlinks would open the flow rather than the referenced record  
+-   Fixed bug where a column filter would hang if there was no filter on the first column     
+  
+## 04/06/24 -  Eric Smith -     Version 4.2.0  
+**Updates:** 
+-   Added optional pagination  
+-       Adds a selectable number of Records per Page input to the header - default value 10  
+-       Adds a navigation footer with a editable input showing the current page # and total number of pages  
+-       The footer also includes Prev & Next buttons as well as optional First & Last Buttons  
+-       The appropriate buttons are disabled if the user is on the first or the last page  
+-       New pagination input prompts and button labels are translatable Custom Labels
+-       (Initial release does not support retaining selected records when sorting, filtering, searching, paginating) 
+-   Made the Table Header Label reactive  
+-   Moved the Configure Columns button from the top to the bottom of the Table Formatting section of the CPE  
+  
+**Bug Fixes:**  
+-   Fixed bug where the maximum number of rows to be displayed gets cleared  
+-   Fixed bug where an invalid link would show when an Apex Defined Lookup field was empty (@spyros-michailidisspyros-michailidis PR#1524)
+-   Fixed install issue with ers_DatatableController.cls if the target org has a class named "Test" 
+-   Fixed a bug where Date fields from External Objects would show as blank (@philipnovak-pentair PR#1529) 
+  
+## 02/06/24 -  Eric Smith -     Version 4.1.6 
 **Bug Fixes:**  
 -   Fixed several Spring '24 "Cannot read properties of undefined..." errors
 -   Allow a full row search when empty cells are present (thanks to clev32 PR#1478)
