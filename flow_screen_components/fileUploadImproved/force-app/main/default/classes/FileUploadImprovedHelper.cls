@@ -67,7 +67,7 @@ public without sharing class FileUploadImprovedHelper{
     }
     
     @AuraEnabled
-    public static void createContentDocLink(List<String> versIds, String encodedKey, Boolean visibleToAllUsers){
+    public static void createContentDocLink(List<String> versIds, String encodedKey, Boolean visibleToAllUsers, Boolean shareTypeInferred){
         List<ContentDocumentLink> links = new List<ContentDocumentLink>();
         for(ContentVersion vers : [SELECT Id, ContentDocumentId, Guest_Record_fileupload__c FROM ContentVersion WHERE Id IN :versIds]){
             ContentDocumentLink link = new ContentDocumentLink(
@@ -77,6 +77,11 @@ public without sharing class FileUploadImprovedHelper{
             if(visibleToAllUsers != null){
                 if(visibleToAllUsers){
                     link.Visibility = 'AllUsers';
+                }
+            }
+            if(shareTypeInferred != null){
+                if(shareTypeInferred){
+                    link.ShareType = 'I';
                 }
             }
             links.add(link);
@@ -168,6 +173,7 @@ public without sharing class FileUploadImprovedHelper{
             for(Input input : inputs){
                 Id recordId = input.recordId;
                 Boolean visibleToAllUsers = input.visibleToAllUsers == null ? FALSE : input.visibleToAllUsers;
+                Boolean shareTypeInferred = input.shareTypeInferred == null ? FALSE : input.shareTypeInferred;
                 for(Id versId : input.versIds){
                     Id docId = mapVersIdToDocId.get(versId);
                     if(docId != null){
@@ -180,6 +186,9 @@ public without sharing class FileUploadImprovedHelper{
                             );
                             if(visibleToAllUsers){
                                 link.Visibility = 'AllUsers';
+                            }
+                            if(shareTypeInferred){
+                                link.ShareType = 'I';
                             }
                             links.add(link);
                         }
@@ -207,6 +216,11 @@ public without sharing class FileUploadImprovedHelper{
             required=true
         )
         public Id recordId;
+
+        @InvocableVariable(
+            label='Set ShareType to Inferred?'
+        )
+        public Boolean shareTypeInferred;
 
         @InvocableVariable(
             label='Visible to All Users?'

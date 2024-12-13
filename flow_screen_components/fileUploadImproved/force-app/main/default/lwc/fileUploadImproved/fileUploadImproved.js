@@ -65,12 +65,19 @@ export default class FileUpload extends NavigationMixin(LightningElement) {
     @api uploadedFileNames;
     @api uploadedlabel;
     @api uploadedLabel; // deprecated
+    
     @api
     get visibleToAllUsers() {
     return cbToBool(this.cb_visibleToAllUsers);
     }
     @api cb_visibleToAllUsers;
-    
+
+    @api
+    get shareTypeInferred() {
+    return cbToBool(this.cb_shareTypeInferred);
+    }
+    @api cb_shareTypeInferred;
+
     @track docIds =[];
     @track fileNames = [];
     @track objFiles = [];
@@ -283,7 +290,7 @@ export default class FileUpload extends NavigationMixin(LightningElement) {
         }
 
         if(this.recordId){
-            createContentDocLink({versIds: versIds, encodedKey: this.key, visibleToAllUsers: this.visibleToAllUsers})
+            createContentDocLink({versIds: versIds, encodedKey: this.key, visibleToAllUsers: this.visibleToAllUsers, shareTypeInferred: this.shareTypeInferred})
                 .catch(error => {
                     this.showErrors(this.reduceErrors(error).toString());
                 });

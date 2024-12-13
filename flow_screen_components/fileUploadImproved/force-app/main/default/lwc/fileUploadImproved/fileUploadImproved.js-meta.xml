@@ -7,7 +7,7 @@
     </targets>
     <masterLabel>File Upload Improved</masterLabel>
     <description>Improving the standard File Upload component.</description>
-    <targetConfigs>
+<targetConfigs>
         <targetConfig targets="lightning__FlowScreen" configurationEditor="c-file-upload-improved-c-p-e">
             <property
                 name="label"
@@ -127,6 +127,14 @@
                 role="inputOnly"
             />
             <property name="cb_visibleToAllUsers" type="String" role="inputOnly" />
+            <property
+                name="shareTypeInferred"
+                type="Boolean"
+                label="Set ShareType to Inferred"
+                description="By default when user uploads a file, the ContentDocumentLink ShareType is set to V (View). If you'd like to make the ShareType I (Inferred), set this to TRUE."
+                role="inputOnly"
+            />
+            <property name="cb_shareTypeInferred" type="String" role="inputOnly" />
             <property
                 name="embedExternally"
                 type="Boolean"

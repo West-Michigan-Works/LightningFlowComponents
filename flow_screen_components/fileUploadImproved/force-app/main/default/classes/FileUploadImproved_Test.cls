@@ -27,7 +27,7 @@ public class FileUploadImproved_Test {
         update cv;
         
         system.test.startTest();
-            FileUploadImprovedHelper.createContentDocLink(new List<String>{cv.Id},key,true);
+            FileUploadImprovedHelper.createContentDocLink(new List<String>{cv.Id},key,true,true);
         system.test.stopTest();
 
 
@@ -45,7 +45,7 @@ public class FileUploadImproved_Test {
         update cv;
         
         system.test.startTest();
-            FileUploadImprovedHelper.createContentDocLink(new List<String>{cv.Id},key,false);
+            FileUploadImprovedHelper.createContentDocLink(new List<String>{cv.Id},key,false,false);
             List<FileUploadImprovedHelper.objFiles> objFiles = FileUploadImprovedHelper.getExistingFiles(con.Id); 
         system.test.stopTest();
 
